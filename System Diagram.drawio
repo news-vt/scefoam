@@ -1,0 +1,82 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/24.7.5 Chrome/126.0.6478.183 Electron/31.3.0 Safari/537.36" version="24.7.5">
+  <diagram name="Page-1" id="P1p3-NK1YnICsch3GEOs">
+    <mxGraphModel dx="1113" dy="643" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="j0pxg_3hJKrJKHqnEC_F-19" value="Robot" style="rounded=0;whiteSpace=wrap;html=1;align=center;verticalAlign=bottom;" vertex="1" parent="1">
+          <mxGeometry x="350" y="460" width="130" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="j0pxg_3hJKrJKHqnEC_F-13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=1;entryY=0.25;entryDx=0;entryDy=0;" edge="1" parent="1" source="j0pxg_3hJKrJKHqnEC_F-2" target="j0pxg_3hJKrJKHqnEC_F-17">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="170" y="315" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="j0pxg_3hJKrJKHqnEC_F-20" value="Sensing Actions" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="j0pxg_3hJKrJKHqnEC_F-13">
+          <mxGeometry x="0.1056" y="-1" relative="1" as="geometry">
+            <mxPoint x="-58" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="j0pxg_3hJKrJKHqnEC_F-2" value="Semantic Comms" style="whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="1">
+          <mxGeometry x="380" y="460" width="70" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="j0pxg_3hJKrJKHqnEC_F-16" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.75;exitDx=0;exitDy=0;entryX=0.25;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="j0pxg_3hJKrJKHqnEC_F-17" target="j0pxg_3hJKrJKHqnEC_F-2">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="170" y="375" as="sourcePoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="j0pxg_3hJKrJKHqnEC_F-22" value="Command Actions" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="j0pxg_3hJKrJKHqnEC_F-16">
+          <mxGeometry x="-0.3126" y="2" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="j0pxg_3hJKrJKHqnEC_F-15" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="j0pxg_3hJKrJKHqnEC_F-14" target="j0pxg_3hJKrJKHqnEC_F-19">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="405" y="620" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="j0pxg_3hJKrJKHqnEC_F-14" value="Sensors" style="whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="1">
+          <mxGeometry x="375" y="610" width="80" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="j0pxg_3hJKrJKHqnEC_F-18" value="Controller" style="rounded=0;whiteSpace=wrap;html=1;align=left;" vertex="1" parent="1">
+          <mxGeometry x="90" y="250" width="130" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="j0pxg_3hJKrJKHqnEC_F-17" value="Semantic Comms" style="whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="1">
+          <mxGeometry x="150" y="285" width="70" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="j0pxg_3hJKrJKHqnEC_F-23" value="ML Model" style="rounded=0;whiteSpace=wrap;html=1;align=center;" vertex="1" parent="1">
+          <mxGeometry x="90" y="380" width="80" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="j0pxg_3hJKrJKHqnEC_F-24" value="&lt;h1 style=&quot;margin-top: 0px;&quot;&gt;Steps&lt;/h1&gt;&lt;p&gt;(1) Connect with conventional methods to Robot&lt;/p&gt;&lt;p&gt;(2) Send a start signal for Semantics Form (special char)&lt;/p&gt;&lt;p&gt;(3) Robot would recieve the sensing data and then convert it to semantic form for sending&lt;/p&gt;&lt;p&gt;(4) The robot would then send the semantic data to the controller&lt;/p&gt;&lt;p&gt;(5) The Controller would then decode the semantics and then input the decoded data into the Machine Learning model.&lt;/p&gt;&lt;p&gt;(6) After inference the controller would send the data to a encoder for sending instructions back to the Robot.&lt;/p&gt;" style="text;html=1;whiteSpace=wrap;overflow=hidden;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="520" y="155" width="280" height="330" as="geometry" />
+        </mxCell>
+        <mxCell id="j0pxg_3hJKrJKHqnEC_F-29" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="j0pxg_3hJKrJKHqnEC_F-25" target="j0pxg_3hJKrJKHqnEC_F-14">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="j0pxg_3hJKrJKHqnEC_F-25" value="Video" style="whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="1">
+          <mxGeometry x="375" y="720" width="80" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="j0pxg_3hJKrJKHqnEC_F-30" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;dashed=1;" edge="1" parent="1" source="j0pxg_3hJKrJKHqnEC_F-26" target="j0pxg_3hJKrJKHqnEC_F-14">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="580" y="650" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="j0pxg_3hJKrJKHqnEC_F-26" value="Lidar" style="whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="1">
+          <mxGeometry x="540" y="720" width="80" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="j0pxg_3hJKrJKHqnEC_F-32" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=1;entryY=0.25;entryDx=0;entryDy=0;dashed=1;" edge="1" parent="1" source="j0pxg_3hJKrJKHqnEC_F-31" target="j0pxg_3hJKrJKHqnEC_F-14">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="700" y="630" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="j0pxg_3hJKrJKHqnEC_F-31" value="Ultrasonic" style="whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="1">
+          <mxGeometry x="660" y="720" width="80" height="80" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
