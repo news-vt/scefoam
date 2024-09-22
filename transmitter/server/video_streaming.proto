@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package video;
+
+service VideoStreaming {
+  rpc StreamVideo(stream VideoFrame) returns (stream VideoFrame);
+}
+
+message VideoFrame {
+  bytes data = 1;       // Raw video frame data
+  int32 width = 2;
+  int32 height = 3;
+  string format = 4;    // e.g., "jpeg"
+}

@@ -1,0 +1,28 @@
+{
+  "name": "transmitter",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "server": "node server/server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@grpc/grpc-js": "^1.11.3",
+    "@grpc/proto-loader": "^0.7.13",
+    "chart.js": "^4.4.4",
+    "react": "^18.3.1",
+    "react-chartjs-2": "^5.2.0",
+    "react-dom": "^18.3.1",
+    "uuid": "^10.0.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "vite": "^5.4.7"
+  }
+}
