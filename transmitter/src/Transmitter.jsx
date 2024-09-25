@@ -93,7 +93,7 @@ function Transmitter() {
 
   return (
     <div>
-      <h1>Transmitter - Sender</h1>
+      <h1>Transmitter</h1>
       <div>
         <video ref={videoRef} autoPlay playsInline style={{ width: '600px' }} muted />
       </div>
