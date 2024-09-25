@@ -1,55 +1,94 @@
 const WebSocket = require('ws');
 
-const wss = new WebSocket.Server({ port: 8080 });
-console.log('WebSocket server running on ws://localhost:8080');
+const PORT = 8080;
+const wss = new WebSocket.Server({ port: PORT });
 
-let senderSocket = null;
-let receiverSocket = null;
+let transmitter = null;
+const receivers = new Set();
 
 wss.on('connection', (ws) => {
-  ws.on('message', async (message) => {
-    const data = JSON.parse(message);
+  ws.id = generateUniqueID();
+  ws.role = null;
 
-    if (data.type === 'sender') {
-      console.log('Sender connected');
-      senderSocket = ws;
-      if (receiverSocket) {
-        await setupWebRTCConnection();
+  console.log('New client connected with ID:', ws.id);
+
+  ws.on('message', (message, isBinary) => {
+    if (isBinary) {
+      // console.log(`Received binary message from client ${ws.id} with role: ${ws.role}`);
+      if (ws.role === 'transmitter') {
+        // console.log(`Received binary data from transmitter ${ws.id}. Relaying to receivers.`);
+        receivers.forEach((receiver) => {
+          if (receiver.readyState === WebSocket.OPEN) {
+            receiver.send(message, { binary: true });
+          }
+        });
+      } else {
+        console.warn(`Received binary data from non-transmitter client ${ws.id}. Ignoring.`);
+        ws.send(JSON.stringify({ type: 'error', message: 'Only transmitter can send binary data.' }));
       }
-    } else if (data.type === 'receiver') {
-      console.log('Receiver connected');
-      receiverSocket = ws;
-      if (senderSocket) {
-        await setupWebRTCConnection();
-      }
-    } else if (data.type === 'offer' && ws === receiverSocket) {
-      console.log('Offer received from Receiver');
-      senderSocket.send(JSON.stringify({ type: 'offer', offer: data.offer }));
-    } else if (data.type === 'answer' && ws === senderSocket) {
-      console.log('Answer received from Sender');
-      receiverSocket.send(JSON.stringify({ type: 'answer', answer: data.answer }));
-    } else if (data.type === 'candidate') {
-      if (ws === senderSocket && receiverSocket) {
-        console.log('Forwarding ICE candidate from Sender to Receiver:', data.candidate); // Add this log
-        receiverSocket.send(JSON.stringify({ type: 'candidate', candidate: data.candidate }));
-      } else if (ws === receiverSocket && senderSocket) {
-        console.log('Forwarding ICE candidate from Receiver to Sender:', data.candidate); // Add this log
-        senderSocket.send(JSON.stringify({ type: 'candidate', candidate: data.candidate }));
+    } else {
+      // Handle text messages
+      console.log(`Received text message from client ${ws.id}: ${message}`);
+
+      try {
+        const data = JSON.parse(message);
+        console.log(`Parsed message from client ${ws.id}:`, data);
+
+        if (data.type === 'sender') {
+          if (transmitter) {
+            console.log(`Client ${ws.id} attempted to register as transmitter, but transmitter ${transmitter.id} is already connected.`);
+            ws.send(JSON.stringify({ type: 'error', message: 'A transmitter is already connected.' }));
+            ws.close();
+            return;
+          }
+          transmitter = ws;
+          ws.role = 'transmitter';
+          console.log(`Client ${ws.id} registered as transmitter.`);
+          ws.send(JSON.stringify({ type: 'sender_acknowledged' }));
+          console.log(`Sent sender_acknowledged to client ${ws.id}`);
+        } else if (data.type === 'receiver') {
+          ws.role = 'receiver';
+          receivers.add(ws);
+          console.log(`Client ${ws.id} registered as receiver.`);
+          ws.send(JSON.stringify({ type: 'receiver_acknowledged' }));
+        } else {
+          console.warn(`Client ${ws.id} sent unknown message type: ${data.type}`);
+          ws.send(JSON.stringify({ type: 'error', message: 'Unknown message type.' }));
+        }
+      } catch (err) {
+        console.error(`Error parsing message from client ${ws.id}:`, err);
+        ws.send(JSON.stringify({ type: 'error', message: 'Invalid JSON format.' }));
       }
     }
   });
 
   ws.on('close', () => {
-    if (ws === senderSocket) {
-      console.log('Sender disconnected');
-      senderSocket = null;
-    } else if (ws === receiverSocket) {
-      console.log('Receiver disconnected');
-      receiverSocket = null;
+    console.log(`Client ${ws.id} disconnected.`);
+    if (ws.role === 'transmitter') {
+      console.log(`Transmitter ${ws.id} has disconnected.`);
+      transmitter = null;
+      // Notify all receivers that the transmitter has disconnected
+      receivers.forEach((receiver) => {
+        if (receiver.readyState === WebSocket.OPEN) {
+          receiver.send(JSON.stringify({ type: 'error', message: 'Transmitter has disconnected.' }));
+        }
+      });
+    } else if (ws.role === 'receiver') {
+      receivers.delete(ws);
+      console.log(`Receiver ${ws.id} has been removed.`);
     }
+  });
+
+  ws.on('error', (error) => {
+    console.error(`WebSocket error with client ${ws.id}:`, error);
   });
 });
 
-async function setupWebRTCConnection() {
-  receiverSocket.send(JSON.stringify({ type: 'start-connection' }));
+// Utility function to generate unique client IDs
+function generateUniqueID() {
+  return 'xxxx-xxxx-xxxx'.replace(/[x]/g, () => {
+    return Math.floor(Math.random() * 16).toString(16);
+  });
 }
+
+console.log(`WebSocket server is running on ws://localhost:${PORT}`);

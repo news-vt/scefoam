@@ -1,118 +1,149 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
+import Metrics from './Metrics'; // Ensure Metrics.js is in the same directory
+import './Receiver.css';
 
 function Receiver() {
-  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
   const wsRef = useRef(null);
-  const peerRef = useRef(null);
   const [isConnected, setIsConnected] = useState(false);
-  const [receivedMessages, setReceivedMessages] = useState([]);
+  const [receivedFrames, setReceivedFrames] = useState(0);
+  const [error, setError] = useState(null);
+  const [videoResolution, setVideoResolution] = useState({ width: 0, height: 0 });
+  const [currentBandwidth, setCurrentBandwidth] = useState(0);
 
+  const bytesReceivedRef = useRef(0);
+  const startTimeRef = useRef(null);
+
+  useEffect(() => {
+    // Cleanup on component unmount
+    return () => {
+      disconnectFromServer();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Function to connect to WebSocket server
   const connectToServer = () => {
-    if (isConnected) return;
-    const ws = new WebSocket('ws://localhost:8080');
-    wsRef.current = ws;
+    if (isConnected) {
+      console.log('Already connected to the server.');
+      return;
+    }
+
+    console.log('Attempting to connect to WebSocket server...');
+    const ws = new WebSocket('ws://localhost:8080'); // Update if server is on a different host/port
+    ws.binaryType = 'arraybuffer'; // Set WebSocket binary type for binary frame handling
 
     ws.onopen = () => {
-      console.log('WebSocket connection opened');
-      ws.send(JSON.stringify({ type: 'receiver' }));
+      console.log('WebSocket connection opened in Receiver');
+      // Send identification message
+      const identificationMessage = { type: 'receiver' };
+      ws.send(JSON.stringify(identificationMessage));
+      console.log('Identification message sent:', identificationMessage);
       setIsConnected(true);
+      setError(null);
+      bytesReceivedRef.current = 0;
+      startTimeRef.current = performance.now();
     };
 
-    ws.onmessage = async (message) => {
-      const data = JSON.parse(message.data);
-      setReceivedMessages((prevMessages) => [
-        ...prevMessages,
-        JSON.stringify(data, null, 2),
-      ]);
+    ws.onmessage = (message) => {
+      if (message.data instanceof ArrayBuffer) {
+        console.log('Received binary frame as ArrayBuffer');
+        const blob = new Blob([message.data], { type: 'image/jpeg' }); // Assuming JPEG image data
 
-      if (data.type === 'start-connection') {
-        console.log('Starting WebRTC connection');
-        await createPeer();
-      } else if (data.type === 'answer') {
-        console.log('Received answer from Sender');
-        await peerRef.current.setRemoteDescription(
-          new RTCSessionDescription(data.answer)
-        );
-      } else if (data.type === 'candidate') {
-        if (data.candidate) {
-          console.log('Received ICE candidate from Sender');
-          await peerRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+        const img = new Image();
+        img.onload = () => {
+          const canvas = canvasRef.current;
+          const ctx = canvas.getContext('2d');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          ctx.drawImage(img, 0, 0);
+
+          // Update video resolution
+          setVideoResolution({
+            width: img.width || 640,
+            height: img.height || 480,
+          });
+        };
+        img.src = URL.createObjectURL(blob);
+
+        // Update received frame count
+        setReceivedFrames((prev) => prev + 1);
+
+        // Bandwidth metrics calculation
+        bytesReceivedRef.current += message.data.byteLength;
+        const currentTime = performance.now();
+        const elapsedTime = currentTime - startTimeRef.current; // in milliseconds
+
+        if (elapsedTime > 1000) {
+          const bandwidthMbps = (bytesReceivedRef.current * 8) / (elapsedTime * 1000); // Convert to Mbps
+          setCurrentBandwidth(bandwidthMbps.toFixed(2));
+
+          // Reset counters
+          bytesReceivedRef.current = 0;
+          startTimeRef.current = currentTime;
+        }
+      } else if (typeof message.data === 'string') {
+        // Handle text messages (e.g., error messages from server)
+        try {
+          const data = JSON.parse(message.data);
+          if (data.type === 'error') {
+            console.error('Server error:', data.message);
+            setError(`Server error: ${data.message}`);
+          } else {
+            console.log('Received text message:', data);
+          }
+        } catch (err) {
+          console.log('Received non-JSON text message:', message.data);
         }
       }
     };
 
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
+    ws.onerror = (errorEvent) => {
+      console.error('WebSocket error in Receiver:', errorEvent);
+      setError('WebSocket encountered an error.');
     };
 
-    ws.onclose = () => {
-      console.log('WebSocket connection closed');
+    ws.onclose = (event) => {
+      console.log('WebSocket connection closed in Receiver:', event);
       setIsConnected(false);
+      setError(null);
     };
+
+    wsRef.current = ws;
   };
 
-  const createPeer = async () => {
-    const peer = new RTCPeerConnection();
-    peerRef.current = peer;
-
-    peer.onicecandidate = (event) => {
-      if (event.candidate) {
-        console.log('Sending ICE candidate to Sender:', event.candidate);
-        wsRef.current.send(JSON.stringify({ type: 'candidate', candidate: event.candidate }));
-      } else {
-        console.log('All ICE candidates have been sent from Receiver.');
-      }
-    };
-
-    peer.ontrack = (event) => {
-      console.log('Received remote stream from sender');
-      if (videoRef.current) {
-        videoRef.current.srcObject = event.streams[0];
-        console.log('Video stream attached to video element');
-      }
-    };
-
-    // **Add transceivers to specify the media you want to receive**
-    peer.addTransceiver('video', { direction: 'recvonly' });
-    peer.addTransceiver('audio', { direction: 'recvonly' });
-
-    const offer = await peer.createOffer();
-    console.log('SDP Offer:', offer.sdp); // Log the SDP offer
-    await peer.setLocalDescription(offer);
-
-    wsRef.current.send(JSON.stringify({ type: 'offer', offer: peer.localDescription }));
+  // Function to disconnect from WebSocket server
+  const disconnectFromServer = () => {
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+      console.log('WebSocket connection closed');
+    }
+    setIsConnected(false);
   };
 
   return (
-    <div>
-      <h1>Receiver</h1>
-      <video
-        ref={videoRef}
-        controls
-        autoPlay
-        style={{ width: '600px', height: '400px' }}
-      ></video>
-      <div style={{ marginTop: '20px' }}>
+    <div className="receiver-container">
+      <h1 className="receiver-title">Receiver (Raw Data)</h1>
+      <div className="canvas-container">
+        <canvas ref={canvasRef} />
+      </div>
+      <Metrics
+        currentBandwidth={currentBandwidth}
+        videoResolution={videoResolution}
+        protocol="WebSocket"
+      />
+      {error && <p className="error-message">{error}</p>}
+      <div className="receiver-buttons">
         <button onClick={connectToServer} disabled={isConnected}>
           Connect to Server
         </button>
+        <button onClick={disconnectFromServer} disabled={!isConnected}>
+          Disconnect
+        </button>
       </div>
-
-      {/* Display received messages */}
-      <div style={{ marginTop: '20px' }}>
-        <h2>Received Messages</h2>
-        <pre
-          style={{
-            background: '#f4f4f4',
-            padding: '10px',
-            maxHeight: '300px',
-            overflowY: 'auto',
-          }}
-        >
-          {receivedMessages.length > 0
-            ? receivedMessages.join('\n\n')
-            : 'No messages received yet.'}
-        </pre>
+      <div className="metrics">
+        <p>Received Frames: {receivedFrames}</p>
       </div>
     </div>
   );
