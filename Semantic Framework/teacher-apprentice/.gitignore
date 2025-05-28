@@ -1,0 +1,4 @@
+# Ignore node_modules
+node_modules/
+
+Semantic Framework/teacher-apprentice/src/glove.6B.100d.txt
