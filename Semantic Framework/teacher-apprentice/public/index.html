@@ -5,72 +5,123 @@
   <meta charset="UTF-8" />
   <title>Semantic Centroid Dashboard</title>
   <script src="https://cdn.plot.ly/plotly-2.29.1.min.js"></script>
+
   <style>
+    /* ------- layout shell ------------------------------------------- */
+    :root {
+      --radius: 12px;
+      --border: #d0d4d9;
+      --bg-card: #f7f8fa;
+      --gap: 22px;
+    }
+
     body {
       font-family: Arial, Helvetica, sans-serif;
       margin: 20px;
-      max-width: 1600px
+      max-width: 1700px;
     }
 
     h1 {
       text-align: center;
-      margin-bottom: .5em
+      margin-bottom: .8em
     }
 
+    /* raised “section” card */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 3px 8px rgba(0, 0, 0, .06);
+      padding: 25px 28px;
+      margin-bottom: 40px;
+    }
+
+    .card>h2 {
+      margin-top: 0;
+      margin-bottom: 18px;
+      font-size: 1.3em;
+      letter-spacing: .02em;
+      text-align: center;
+    }
+
+    /* inside-card grid (two columns) */
     .grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 30px
+      gap: var(--gap);
     }
 
     .col {
       display: flex;
       flex-direction: column;
-      gap: 18px
+      gap: var(--gap);
     }
 
+    /* common form parts --------------------------------------------- */
     .field {
       display: flex;
       flex-direction: column;
-      gap: 4px
+      gap: .4em
     }
 
     .btn-row {
       display: flex;
-      gap: 12px
+      gap: 14px
     }
 
     label {
-      font-weight: bold
+      font-weight: bold;
+      font-size: .9em
     }
 
     input,
     button {
       font-size: 1em;
-      padding: 10px
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
     }
 
     input {
       width: 100%;
-      box-sizing: border-box
+      box-sizing: border-box;
     }
 
     button {
-      cursor: pointer
+      background: #fff;
+      cursor: pointer;
+      transition: .15s;
     }
 
+    button:hover {
+      background: #ebeff3
+    }
+
+    /* data panels ---------------------------------------------------- */
     .panel {
-      background: #f9f9f9;
-      border: 2px solid #000;
-      padding: 10px;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px;
       min-height: 160px;
       white-space: pre-wrap;
-      overflow-y: auto
+      overflow-y: auto;
     }
 
+    /* plot size override */
     #tsnePlot {
       width: 100%;
       height: 400px
+    }
+
+    /* status badge */
+    #modelBadge {
+      font-size: .7em;
+      padding: .25em .6em;
+      margin-left: .6em;
+      border-radius: 6px;
+      color: #fff;
+      background: #e67e22;
     }
   </style>
 </head>
@@ -78,72 +129,101 @@
 <body>
   <h1>
     Semantic Centroid Dashboard
-    <span id="modelBadge" style="font-size:.65em;padding:.2em .5em;margin-left:.5em;
-               background:#e67e22;color:#fff;border-radius:4px">
-      training…
-    </span>
   </h1>
 
   <datalist id="peersList"></datalist>
 
-  <div class="grid">
-    <!-- left column --------------------------------------------------->
-    <div class="col">
-      <div class="field">
-        <label for="sendAddr">SEND IP/PORT</label>
-        <input id="sendAddr" list="peersList" placeholder="e.g. localhost:3001">
-      </div>
+  <!-- ─────────────── TEACHER ─────────────── -->
+  <section class="card" id="teacherCard">
+    <h2>Teacher</h2>
+    <div class="grid">
 
-      <div class="field">
-        <label for="entryBox">SENDING DATA</label>
-        <input id="entryBox" placeholder="Type text to send …">
-      </div>
+      <!-- LEFT column -->
+      <div class="col">
+        <div class="field">
+          <label for="sendAddr">SEND IP/PORT</label>
+          <input id="sendAddr" list="peersList" placeholder="e.g. localhost:3001">
+        </div>
 
-      <div class="field">
-        <label>RECEIVED DATA LOG</label>
-        <div id="receivedData" class="panel">(no teacher data yet)</div>
-      </div>
+        <div class="field">
+          <label for="entryBox">SENDING DATA</label>
+          <div class="btn-row">
+            <input id="entryBox" placeholder="Type text to send …">
+            <button id="sendBtn">SEND</button>
+          </div>
+        </div>
 
-      <div class="field">
-        <label>KNOWLEDGE BASE (Tokens)</label>
-        <div id="rawData" class="panel">(loading…)</div>
-      </div>
-    </div>
+        <div class="field">
+          <label>KNOWLEDGE BASE</label>
+          <div id="rawData" class="panel">(loading…)</div>
+        </div>
 
-    <!-- right column -------------------------------------------------->
-    <div class="col">
-      <div class="field">
-        <label for="myAddr">MY IP/PORT</label>
-        <input id="myAddr" readonly>
-      </div>
-
-      <div class="btn-row">
-        <button id="sendBtn">SEND</button>
         <button id="clearBtn" style="background:#e74c3c;color:#fff">Clear KB</button>
+
       </div>
 
-      <div class="field">
-        <label>CURRENT CENTROIDS</label>
-        <div id="currCentroids" class="panel">(none yet)</div>
-      </div>
+      <!-- RIGHT column -->
+      <div class="col">
 
-      <div class="field">
-        <label>PREDICTED CENTROIDS</label>
-        <div id="predCentroids" class="panel">(none yet)</div>
-      </div>
+        <div class="field">
+          <label>CURRENT CENTROIDS</label>
+          <div id="currCentroids" class="panel">(none yet)</div>
+        </div>
 
-      <button id="predictBtn" style="width:max-content;align-self:flex-start">
-        Predict Future Centroids
-      </button>
-
-      <div class="field" style="padding:0">
-        <label>t-SNE Vis.</label>
-        <div class="panel" style="padding:0;border:none">
-          <div id="tsnePlot"></div>
+        <div class="field">
+          <label>t-SNE Vis.</label>
+          <div class="panel" style="padding:0">
+            <div id="tsnePlot"></div>
+          </div>
         </div>
       </div>
-    </div>
-  </div>
+
+    </div> <!-- grid -->
+  </section>
+
+  <!-- ─────────────── APPRENTICE ─────────────── -->
+  <section class="card" id="apprenticeCard">
+    <h2>Apprentice</h2>
+    <div class="grid">
+
+      <!-- LEFT column -->
+      <div class="col">
+        <div class="field">
+          <label for="myAddr">MY IP/PORT</label>
+          <input id="myAddr" readonly>
+        </div>
+
+        <div class="field">
+          <label>RECEIVED DATA LOG</label>
+          <div id="receivedData" class="panel">(no teacher data yet)</div>
+        </div>
+
+        <div class="field">
+          <label>PREDICT DATA</label>
+          <div id="predCentroids" class="panel">(none yet)</div>
+        </div>
+        <span id="modelBadge">training…</span>
+        <button id="predictBtn" style="width:max-content">Predict Future Centroids </button>
+
+      </div>
+
+      <!-- RIGHT column -->
+      <div class="col">
+        <div class="field">
+          <label>CURRENT CENTROIDS</label>
+          <div id="currCentroids" class="panel">(none yet)</div>
+        </div>
+
+        <div class="field">
+          <label>t-SNE Vis.</label>
+          <div class="panel" style="padding:0">
+            <div id="tsnePlotApprentice"></div>
+          </div>
+        </div>
+      </div>
+
+    </div> <!-- grid -->
+  </section>
 
   <script>
     /* DOM --------------------------------------------------------------*/
@@ -256,43 +336,60 @@
     }
     pollModelStatus(); setInterval(pollModelStatus, 3000);
 
-/* actions ----------------------------------------------------------*/
-async function sendData () {
-  const text = entryBox.value.trim();
-  if (!text) return;
+    /* actions ----------------------------------------------------------*/
 
-  /* ---------- 1. local  /send  ---------- */
-  const locResp = await fetch('/send', {
-    method : 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body   : JSON.stringify({ data: text })
-  });
-  if (!locResp.ok) { alert('Local /send failed'); return; }
+    /* actions ----------------------------------------------------------*/
+    async function sendData() {
+      const text = entryBox.value.trim();
+      if (!text) return;
 
-  /* reply shape = { centroids:{…}, hitLabels:[ 'C1(Nature)', … ] } */
-  const { hitLabels = [] } = await locResp.json();
-
-  /* ---------- 2. optional remote forward ---------- */
-  const remote = sendAddr.value.trim();
-  if (remote && remote !== window.location.host && hitLabels.length) {
-    let url = remote.startsWith('http') ? remote : `http://${remote}`;
-    if (!url.endsWith('/')) url += '/';
-    try {
-      const f = await fetch(url + 'receive', {
-        method : 'POST',
+      const locResp = await fetch('/send', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body   : JSON.stringify({ centroids: hitLabels })
+        body: JSON.stringify({ data: text })
       });
-      if (f.ok) rememberPeer(remote);
-    } catch (e) {
-      console.warn('Remote forward failed', e.message);
-      rememberPeer(remote);
-    }
-  }
+      if (!locResp.ok) { alert('Local /send failed'); return; }
 
-  entryBox.value = '';
-  await refreshAll();
-}
+      const { centroids = {}, hitLabels = [] } = await locResp.json();
+
+      const remote = sendAddr.value.trim();
+      if (remote && remote !== window.location.host && hitLabels.length) {
+
+        /* 2-a  subset of vectors + label map */
+        const subset = {};
+        const subsetNames = {};
+        for (const lbl of hitLabels) {
+          const m = /^C(\d+)\((.+)\)/.exec(lbl);
+          if (!m) continue;
+          const id = m[1], name = m[2];
+          if (centroids[id]) {
+            subset[id] = centroids[id];
+            subsetNames[id] = name;
+          }
+        }
+
+        if (Object.keys(subset).length) {
+          let url = remote.startsWith('http') ? remote : `http://${remote}`;
+          if (!url.endsWith('/')) url += '/';
+
+          await fetch(url + 'receive', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              centroids: subset,
+              labels: subsetNames,
+              pretty: hitLabels              // for the apprentice log
+            })
+          }).catch(e => console.warn('Remote forward failed:', e.message));
+
+          rememberPeer(remote);
+        }
+      }
+
+      entryBox.value = '';
+      await refreshAll();
+    }
+
 
     async function clearAll() {
       if (!confirm('Really clear ALL local data?')) return;
@@ -313,7 +410,7 @@ async function sendData () {
 
     /* event wiring -----------------------------------------------------*/
     sendBtn.addEventListener('click', sendData);
-    clearBtn.addEventListener('click', clearAll);
+    clearBtn?.addEventListener('click', clearAll);
     predictBtn.addEventListener('click', predictFuture);
     entryBox.addEventListener('keypress', e => e.key === 'Enter' && sendData());
 

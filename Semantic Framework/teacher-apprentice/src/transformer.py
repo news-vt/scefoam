@@ -1,83 +1,127 @@
 #!/usr/bin/env python3
-# File: transformer.py  (drop-in replacement)
+# File: src/transformer.py   ← full replacement
 
 from __future__ import annotations
-import sys, json, math, warnings, torch
-import torch.nn as nn
+import os
+import sys
+import json
+import math
+import warnings
 from pathlib import Path
 
-warnings.filterwarnings("ignore", category=UserWarning)          # hush torch notes
-MODEL_PATH = Path("transformer_model.pt")
+import torch
+import torch.nn as nn
 
-# ───────────────── positional encoding ─────────────────────────────
-class PositionalEncoding(nn.Module):
-    def __init__(self, d_model: int, max_len: int = 500):
-        super().__init__()
-        pe  = torch.zeros(max_len, d_model)
-        pos = torch.arange(max_len, dtype=torch.float32).unsqueeze(1)
-        div = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
-        pe[:, 0::2], pe[:, 1::2] = torch.sin(pos * div), torch.cos(pos * div)
-        self.register_buffer("pe", pe)
+warnings.filterwarnings("ignore", category=UserWarning)  # hush torch notes
 
-    def forward(self, x):                           # (L,B,D)
-        return x + self.pe[: x.size(0)]
+# every apprentice instance passes its own port via ENV → model file is unique
+PORT       = os.getenv("PORT_ARG", "")                       # "" for teacher
+MODEL_PATH = Path(f"transformer_model_{PORT}.pt")            # per-port file
 
-# ───────────────── sequence forecaster ─────────────────────────────
-class TransformerForecast(nn.Module):
+
+# ─────────────────────── simple encoder–decoder ──────────────────────
+class Seq2SeqForecast(nn.Module):
     def __init__(self, feat: int, layers: int = 2, heads: int = 4, ff: int = 256):
         super().__init__()
-        self.in_proj  = nn.Linear(feat, feat)
-        enc_layer     = nn.TransformerEncoderLayer(d_model=feat, nhead=heads,
-                                                   dim_feedforward=ff)
-        self.encoder  = nn.TransformerEncoder(enc_layer, layers)
-        self.out_proj = nn.Linear(feat, feat)
+        # encoder
+        enc_layer = nn.TransformerEncoderLayer(d_model=feat, nhead=heads,
+                                               dim_feedforward=ff)
+        self.encoder = nn.TransformerEncoder(enc_layer, layers)
+        # decoder
+        dec_layer = nn.TransformerDecoderLayer(d_model=feat, nhead=heads,
+                                               dim_feedforward=ff)
+        self.decoder = nn.TransformerDecoder(dec_layer, layers)
+        # input/output projections
+        self.input_proj  = nn.Linear(feat, feat)
+        self.output_proj = nn.Linear(feat, feat)
 
-    def forward(self, src):                         # (L,B,D)
-        return self.out_proj(self.encoder(self.in_proj(src)))
+        # positional embeddings (optional but usually helpful)
+        pe = torch.zeros(500, feat)
+        pos = torch.arange(0, 500, dtype=torch.float32).unsqueeze(1)
+        div = torch.exp(torch.arange(0, feat, 2) * (-math.log(10000.0) / feat))
+        pe[:, 0::2], pe[:, 1::2] = torch.sin(pos * div), torch.cos(pos * div)
+        self.register_buffer("pos_emb", pe)
 
-# ───────────────── helpers ─────────────────────────────────────────
+    def forward(self, src, tgt):
+        # src: (S, B, F), tgt: (T, B, F)
+        S, B, F = src.shape
+        T = tgt.shape[0]
+        src = self.input_proj(src) + self.pos_emb[:S].unsqueeze(1)
+        tgt = self.input_proj(tgt) + self.pos_emb[:T].unsqueeze(1)
+        memory = self.encoder(src)
+        out    = self.decoder(tgt, memory)
+        return self.output_proj(out)
+
+
+# ──────────────────────── helpers ───────────────────────────────────
 def load_kb(p: str) -> dict:
     return json.loads(Path(p).read_text(encoding="utf-8"))
 
-def flatten(hist: list[dict]) -> tuple[torch.Tensor, list[str]]:
-    """history[list[{cid:vec}]] → (T,F) tensor  &  ordered centroid-id list"""
-    ids  = sorted(hist[0], key=lambda k: int(k))
-    rows = [[v for cid in ids for v in snap[cid]] for snap in hist]
+
+def _flatten_snapshots(hist: list[dict]) -> tuple[torch.Tensor, list[str]]:
+    """
+    Convert a list of centroid‐snapshots [ {cid:vec}, … ]
+    into a tensor of shape (T, F) and ordered list of IDs.
+    """
+    # collect all IDs in history, sorted numerically
+    ids = sorted({cid for snap in hist for cid in snap}, key=lambda k: int(k))
+    # infer vector dim
+    any_vec = next(v for snap in hist for v in snap.values())
+    dim     = len(any_vec)
+    zeros   = [0.0] * dim
+
+    rows = []
+    for snap in hist:
+        row = []
+        for cid in ids:
+            row.extend(snap.get(cid, zeros))
+        rows.append(row)
     return torch.tensor(rows, dtype=torch.float32), ids
+
 
 def save_ckpt(net: nn.Module, feat: int) -> None:
     torch.save({"feature_size": feat, "state": net.state_dict()}, MODEL_PATH)
 
-def load_ckpt(feat: int) -> TransformerForecast:
+
+def load_ckpt(feat: int) -> Seq2SeqForecast:
     chk = torch.load(MODEL_PATH, map_location="cpu")
     if chk.get("feature_size") != feat:
         raise ValueError("feature-size mismatch")
-    net = TransformerForecast(feat); net.load_state_dict(chk["state"]); return net
+    model = Seq2SeqForecast(feat)
+    model.load_state_dict(chk["state"])
+    return model
 
-# ───────────────── training core ───────────────────────────────────
-def _train_internal(kb_path: str) -> TransformerForecast:
+
+# ───────────────────────── training core ────────────────────────────
+def _train_internal(kb_path: str) -> Seq2SeqForecast:
     hist = load_kb(kb_path).get("centroidHistory", [])
     if len(hist) < 2:
         raise RuntimeError("Not enough history to train")
 
-    seq, _      = flatten(hist)                # (T,F)
-    src, tgt    = seq[:-1].unsqueeze(1), seq[1:].unsqueeze(1)
-    feat        = seq.size(1)
+    seq, ids = _flatten_snapshots(hist)      # (T, F)
+    S, F     = seq.shape
+    # teacher‐forced input: feed all steps except the last as tgt_in,
+    # and predict steps 1..T as tgt_out
+    src    = seq.unsqueeze(1)                # (T,1,F)
+    tgt_in = seq[:-1].unsqueeze(1)           # (T-1,1,F)
+    tgt_out= seq[1:].unsqueeze(1)            # (T-1,1,F)
 
-    net         = TransformerForecast(feat)
-    opt         = torch.optim.AdamW(net.parameters(), lr=1e-3)
-    loss_fn     = nn.MSELoss()
+    model  = Seq2SeqForecast(F)
+    opt    = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    loss_fn= nn.MSELoss()
 
-    net.train()
-    for _ in range(50):
-        opt.zero_grad(set_to_none=True)
-        loss_fn(net(src), tgt).backward()
+    model.train()
+    for _ in range(200):                     # small data → more epochs
+        opt.zero_grad()
+        pred = model(src, tgt_in)            # (T-1,1,F)
+        loss_fn(pred, tgt_out).backward()
         opt.step()
 
-    save_ckpt(net, feat)
-    return net
+    save_ckpt(model, F)
+    return model
 
-# ───────────────── public CLI commands ─────────────────────────────
+
+# ───────────────────── public CLI commands ─────────────────────────
 def train(kb: str) -> None:
     try:
         _train_internal(kb)
@@ -85,37 +129,44 @@ def train(kb: str) -> None:
     except Exception as e:
         print(json.dumps({"error": str(e)}))
 
+
 def predict(kb: str) -> None:
-    hist = load_kb(kb).get("centroidHistory", [])
-    if not hist:
-        print(json.dumps({"error": "No history to predict"})); return
+    kbdata = load_kb(kb)
+    hist   = kbdata.get("centroidHistory", [])
+    if len(hist) < 2:
+        print(json.dumps({"error": "Model not trained yet"}))
+        return
 
-    seq, ids = flatten(hist); feat = seq.size(1)
+    seq, ids = _flatten_snapshots(hist)     # (T, F)
+    F         = seq.size(1)
 
+    # prepare src tensor (full history)
+    src = seq.unsqueeze(1)                  # (T,1,F)
+    # decoder start: use the last vector as first input
+    tgt = seq[-1].view(1,1,F)               # (1,1,F)
+
+    # load or train
     try:
-        net = load_ckpt(feat)
-    except Exception:                            # no ckpt or wrong size → train
-        try:
-            net = _train_internal(kb)
-        except Exception as e:
-            print(json.dumps({"error": f"Training failed: {e}"})); return
+        model = load_ckpt(F)
+    except Exception:
+        model = _train_internal(kb)
 
-    net.eval()
+    model.eval()
     with torch.no_grad():
-        out = net(seq.unsqueeze(1))              # (T,1,F)
+        out = model(src, tgt)                # (1,1,F)
 
-    nxt  = out[-1, 0].tolist()
-    step = feat // len(ids)
-    fut  = {cid: nxt[i*step:(i+1)*step] for i, cid in enumerate(ids)}
+    nxt = out[0,0].tolist()                 # flat length‐F
+    step = F // len(ids)
+    fut  = {cid: nxt[i*step:(i+1)*step] for i,cid in enumerate(ids)}
     print(json.dumps({"centroids": fut}))
 
-# ───────────────── CLI entrypoint ──────────────────────────────────
+
+# ─────────────────────────── CLI wiring ────────────────────────────
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         print(json.dumps({"error": "Usage: transformer.py [train|predict] <kb>"}))
         sys.exit(1)
 
-    {"train": train, "predict": predict}.get(
-        sys.argv[1],
-        lambda _: print(json.dumps({"error": f"Unknown cmd {sys.argv[1]}"}))
-    )(sys.argv[2])
+    # expose port before anything else reads it
+    os.environ["PORT_ARG"] = Path(sys.argv[2]).stem.rsplit('_',1)[-1]
+    {"train": train, "predict": predict}[sys.argv[1]](sys.argv[2])

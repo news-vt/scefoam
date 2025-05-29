@@ -26,16 +26,19 @@ import warnings
 import traceback
 from pathlib import Path
 from sklearn.manifold import TSNE
+import sys
 
 # Silence numeric warnings inside PCA/TSNE
 warnings.filterwarnings("ignore")
 
 # Paths
+PORT = sys.argv[1] if len(sys.argv) > 1 else ""        # "" → fallback
+SUFFIX = f"_{PORT}" if PORT else ""
+
 BASE   = Path(__file__).parent
 PUBLIC = BASE / "public"
-KB     = PUBLIC / "knowledge_base.json"
-OUT    = PUBLIC / "tsne_data.json"
-
+KB     = PUBLIC / f"knowledge_base{SUFFIX}.json"
+OUT    = PUBLIC / f"tsne_data{SUFFIX}.json"
 # Load KB
 with open(KB, "r", encoding="utf-8") as f:
     kb = json.load(f)

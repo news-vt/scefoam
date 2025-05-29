@@ -53,16 +53,23 @@ const sf = new SemanticFramework(
   transformerScript
 );
 
-/* ▸ t-SNE recompute */
+// /* ▸ t-SNE recompute */
+// function recomputeTSNE() {
+//   const tsnePublic = path.join(path.dirname(tsneScript), 'public');
+//   fs.mkdirSync(tsnePublic, { recursive: true });
+//   fs.copyFileSync(kbFile, path.join(tsnePublic, 'knowledge_base.json'));
+//   try {
+//     execSync(`python "${tsneScript}"`, { stdio: 'ignore' });
+//     const generic = path.join(tsnePublic, 'tsne_data.json');
+//     if (fs.existsSync(generic)) fs.copyFileSync(generic, tsneFile);
+//   } catch { }
+// }
+
 function recomputeTSNE() {
-  const tsnePublic = path.join(path.dirname(tsneScript), 'public');
-  fs.mkdirSync(tsnePublic, { recursive: true });
-  fs.copyFileSync(kbFile, path.join(tsnePublic, 'knowledge_base.json'));
   try {
-    execSync(`python "${tsneScript}"`, { stdio: 'ignore' });
-    const generic = path.join(tsnePublic, 'tsne_data.json');
-    if (fs.existsSync(generic)) fs.copyFileSync(generic, tsneFile);
-  } catch { }
+    // pass the port so the Python script can read/write the right files
+    execSync(`python "${tsneScript}" ${PORT}`, { stdio: 'ignore' });
+  } catch { /* ignore failure; caller will just render old plot */ }
 }
 
 /* ▸ API */
@@ -79,36 +86,73 @@ app.post('/send', (req, res) => {
   if (!data) return res.status(400).json({ error: 'Missing "data".' });
   try {
     // const { centroids, hitIds } = sf.send(data);
-    const {centroids,hitLabels}=sf.send(data);
+    const { centroids, hitLabels } = sf.send(data);
     recomputeTSNE();
-    sf._saveKB();               
+    sf._saveKB();
     // res.json({ centroids, hitIds });
-    res.json({centroids,hitLabels});
+    res.json({ centroids, hitLabels });
   } catch (e) {
     console.error('/send', e);
     res.status(500).json({ error: e.message });
   }
 });
 
-/* ■ RECEIVE – accepts {centroids:[ "C1(Nature)", … ]} OR {data:"…"} */
+/* ■ RECEIVE – accepts
+   { centroids:{…}, labels:{…}, pretty:[…] }  ← forwarded from teacher
+   or
+   { data:"…" }                               ← plain text                        */
 app.post('/receive', (req, res) => {
-  const { data, centroids } = req.body;
+  const { data, centroids, labels = {}, pretty = [] } = req.body;
 
-  /* basic validation */
-  const hasText  = typeof data === 'string' && data.trim().length;
-  const hasCenters = Array.isArray(centroids) && centroids.length;
+  const hasText = typeof data === 'string' && data.trim().length;
+  const hasVecs = centroids && typeof centroids === 'object' &&
+    Object.keys(centroids).length;
+  const hasPretty = Array.isArray(pretty) && pretty.length;
+  const hasNames = labels && typeof labels === 'object';
 
-  if (!hasText && !hasCenters) {
-    return res.status(400).json({ error: 'Missing payload.' });
+  if (!hasText && !hasVecs) {
+    return res.status(400).json({ error: 'Nothing to receive.' });
   }
 
   try {
-    if (hasCenters) {
-      /* already of form "C3(Computer)" etc. — log as-is */
-      sf.receive(centroids.join(', '));
-    } else {
-      sf.receive(data.trim());
+    /* ---------- 1. human-readable log line ------------------------- */
+    if (hasText) sf.receive(data.trim());
+    else if (hasPretty) sf.receive(pretty.join(', '));
+    else sf.receive(Object.keys(centroids).map(id => `C${id}`).join(', '));
+
+    /* merge new centroid names */
+    if (hasNames) Object.assign(sf.centroidLabels, labels);
+
+    /* ---------- 2. learn vectors & build snapshot ------------------ */
+    if (hasVecs) {
+      /* 2-a merge (keeps older ids we didn’t hit this turn) */
+      Object.assign(sf.centroids, centroids);
+
+      /* 2-b full snapshot with *all* known ids */
+      const snap = {};
+      for (const [id, vec] of Object.entries(sf.centroids)) snap[id] = vec;
+      sf.centroidHistory.push(snap);
+      sf._saveKB();
+
+      /* 2-c train once we have ≥2 snapshots */
+      if (sf.centroidHistory.length >= 2) {
+        try {
+          execSync(
+            `python "${transformerScript}" train "${kbFile}"`,
+            {
+              stdio: 'ignore',
+              maxBuffer: 32 * 1024 * 1024,
+              env: { ...process.env, PORT_ARG: String(PORT) }
+            }
+          );
+          sf.modelReady = true;
+        } catch (e) {
+          console.warn('transformer training failed:', e.message);
+          sf.modelReady = false;
+        }
+      }
     }
+
     recomputeTSNE();
     res.json({ ok: true });
   } catch (e) {
@@ -116,6 +160,8 @@ app.post('/receive', (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
+
 
 
 /* ■ PREDICT */
