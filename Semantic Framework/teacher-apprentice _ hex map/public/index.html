@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Semantic Communication Dashboard</title>
+  <style>
+    :root{--radius:12px;--border:#d0d4d9;--bg-card:#f7f8fa;--gap:22px}
+    body{font-family:Arial,Helvetica,sans-serif;margin:20px;max-width:1500px}
+    h1{text-align:center;margin-bottom:.8em}
+    .card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);
+          box-shadow:0 3px 8px rgba(0,0,0,.06);padding:24px;margin-bottom:40px}
+    .card>h2{margin:0 0 18px;font-size:1.3em;text-align:center}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--gap)}
+    .col{display:flex;flex-direction:column;gap:var(--gap)}
+    .field{display:flex;flex-direction:column;gap:.4em}
+    .btn-row{display:flex;gap:14px}
+    label{font-weight:bold;font-size:.9em}
+    input,button{font-size:1em;padding:10px;border:1px solid var(--border);
+                 border-radius:var(--radius)}
+    input{width:100%;box-sizing:border-box}
+    button{background:#fff;cursor:pointer;transition:.15s}
+    button:hover{background:#ebeff3}
+    .panel{background:#fff;border:1px solid var(--border);border-radius:var(--radius);
+           padding:12px;min-height:140px;white-space:pre-wrap;overflow-y:auto}
+    #modelBadge{font-size:.75em;padding:.25em .6em;border-radius:6px;color:#fff;
+                background:#e67e22;margin-left:8px}
+  </style>
+</head>
+<body>
+<h1>Semantic Communication Dashboard</h1>
+
+<datalist id="peersList"></datalist>
+
+<!-- ─────────── TEACHER ─────────── -->
+<section class="card">
+  <h2>Teacher</h2>
+  <div class="grid">
+    <div class="col">
+      <div class="field">
+        <label for="sendAddr">SEND IP:PORT</label>
+        <input id="sendAddr" list="peersList" placeholder="e.g. localhost:3001">
+      </div>
+
+      <div class="field">
+        <label for="entryBox">SENDING TEXT</label>
+        <div class="btn-row">
+          <input id="entryBox" placeholder="Type text to send…">
+          <button id="sendBtn">SEND</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>KNOWLEDGE BASE (HEX → EMBED)</label>
+        <div id="kbTeacher" class="panel">(loading…)</div>
+      </div>
+
+      <button id="clearBtn" style="background:#e74c3c;color:#fff;width:max-content">Clear KB</button>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────── APPRENTICE ─────────── -->
+<section class="card">
+  <h2>Apprentice</h2>
+  <div class="grid">
+    <div class="col">
+      <div class="field">
+        <label for="myAddr">MY IP:PORT</label>
+        <input id="myAddr" readonly>
+      </div>
+
+      <div class="field">
+        <label>RECEIVED DATA LOG</label>
+        <div id="receivedPanel" class="panel">(no teacher data yet)</div>
+      </div>
+
+      <div class="field">
+        <label>PREDICTED NEXT TEXT</label>
+        <div id="predPanel" class="panel">(none yet)</div>
+      </div>
+
+      <div class="btn-row">
+        <button id="predictBtn">Predict</button>
+        <span id="modelBadge">training…</span>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="field">
+        <label>KNOWLEDGE BASE (HEX → EMBED)</label>
+        <div id="kbApprentice" class="panel">(none yet)</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+$('myAddr').value = location.host;
+
+const kbTeacher  = $('kbTeacher'), kbAppr = $('kbApprentice');
+const recvPanel  = $('receivedPanel'), predPanel = $('predPanel');
+const badge      = $('modelBadge');
+const NO_CACHE   = { cache:'no-store' };
+
+function fmtKB(map){
+  return Object.entries(map)
+    .map(([hex,vec])=>`${hex} : [${vec.slice(0,5).map(n=>n.toFixed(3)).join(', ')} …]`)
+    .join('\n') || '(empty)';
+}
+
+async function refresh(){
+  const r = await fetch('/knowledge_base', NO_CACHE);
+  if(!r.ok) return;
+  const j = await r.json();
+  kbTeacher.textContent = fmtKB(j.map);
+  kbAppr.textContent    = fmtKB(j.map);
+  recvPanel.textContent = j.receivedData.join('\n') || '(no teacher data yet)';
+  predPanel.textContent = j.predictedText || '(none yet)';
+  badge.textContent     = j.modelReady ? 'ready' : 'training…';
+  badge.style.background= j.modelReady ? '#27ae60' : '#e67e22';
+}
+refresh(); setInterval(refresh,5000);
+
+/* ---------- SEND helper (now forwards to remote) ---------- */
+async function send(){
+  const txt  = $('entryBox').value.trim();
+  if(!txt) return;
+  const peer = $('sendAddr').value.trim();
+
+  /* 1⃣ local */
+  const local = await fetch('/send',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({data:txt})
+  }).then(r=>r.json());
+
+  /* 2⃣ remote forward if peer specified and fetch succeeded */
+  if(peer){
+    const url = peer.startsWith('http')?peer:`http://${peer}`;
+    await fetch(`${url}/receive`,{
+      mode:'cors',
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({payload:local.payload})   // <- array of hex / [hex,vec]
+    }).catch(e=>console.warn('forward failed',e.message));
+  }
+
+  $('entryBox').value=''; refresh();
+}
+
+async function clearKB(){ if(confirm('Clear KB?')) await fetch('/clear',{method:'POST'}).then(refresh);}
+async function predict(){ await fetch('/predict',{method:'POST'}).then(refresh);}
+
+$('sendBtn').onclick    = send;
+$('clearBtn').onclick   = clearKB;
+$('predictBtn').onclick = predict;
+$('entryBox').addEventListener('keypress',e=>e.key==='Enter'&&send());
+</script>
+
+</body>
+</html>
