@@ -16,9 +16,6 @@ const PY         = process.env.PYTHON || 'python';
  *                               → returns Buffer(PNG)
  */
 class ImageCodec {
-  constructor() {
-    // nothing to initialize
-  }
 
   embed(absPath) {
     // Call Python to encode <absPath> → latent array

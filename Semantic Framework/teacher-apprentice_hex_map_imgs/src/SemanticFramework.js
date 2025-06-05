@@ -1,10 +1,7 @@
-/* eslint-disable no-console */
-// ──────────────────────────────────────────────────────────────
-// Image‐aware SemanticFramework – latent‐only transport
-// ──────────────────────────────────────────────────────────────
+// SemanticFramework.js
+
 import fs from 'fs';
 import path from 'path';
-import GloveEmbedding from './embedding.js';
 import ImageCodec from './image_embedding.js';
 import TransformerModel from './model.js';
 
@@ -37,52 +34,74 @@ function cosineSimilarity(A, B) {
   }
 
   if (normA === 0 || normB === 0) {
-    // If one vector is zero‐length, treat similarity as 0.
     return 0;
   }
   return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
-
 export class SemanticFramework {
   /**
-   * @param {Object}   options
-   * @param {string}   options.kbPath       – path to knowledge‐base JSON
-   * @param {GloveEmbedding} options.embedding
+   * @param {Object} options
+   * @param {Map<string, number[]>} [options.kb]
+   *   – If you pass a preloaded Map, we'll bypass file loading entirely.
+   * @param {string} [options.kbPath]
+   *   – Path to JSON KB. Ignored if `kb` is provided.
+   * @param {ImageCodec} options.embedding
+   *   – Any embedding instance (must have .embed() and .devectorize()).
    * @param {TransformerModel} options.model
-   * @param {string}   options.imgDir       – **NEW**: folder where decoded PNGs go
+   *   – Any model instance (must have .predict(), .fit(), etc.).
+   * @param {string} [options.imgDir='public/images']
+   *   – Where to write decoded PNGs (for <img:…> tokens).
    */
   constructor({
+    kb = null,
     kbPath = 'knowledge_base.json',
-    embedding = new GloveEmbedding(),
-    model = new TransformerModel(),
-    imgDir = 'public/images'    // ← default in case you forget to pass it
+    embedding,
+    model,
+    imgDir = 'public/images'
   } = {}) {
+    if (!embedding) {
+      throw new Error('SemanticFramework: you must provide an embedding instance.');
+    }
+    if (!model) {
+      throw new Error('SemanticFramework: you must provide a model instance.');
+    }
+
     this.embedding = embedding;
     this.imgCodec = new ImageCodec();
     this.model = model;
-    this.kbPath = kbPath;
-    this.imgDir = imgDir;     // <— store imgDir so receive() can use it
+    this.imgDir = imgDir;
 
-    /* ── load persisted KB wrapper ───────────────────────────── */
-    let wrapper = {};
-    if (fs.existsSync(kbPath)) {
-      try { wrapper = JSON.parse(fs.readFileSync(kbPath, 'utf8')); }
-      catch { /* corrupted → start fresh */ }
+    // ── If caller gave us an in‐memory Map for KB, use it; else load from disk:
+    if (kb instanceof Map) {
+      this.kb = kb;
+      this.receivedData = [];
+      this.hexHistory = [];
+      this.predictedText = '';
+      this.modelReady = false;
+      this.kbPath = null; // signal that we’re in “memory‐only” mode
+    } else {
+      this.kbPath = kbPath;
+      let wrapper = {};
+      if (fs.existsSync(kbPath)) {
+        try {
+          wrapper = JSON.parse(fs.readFileSync(kbPath, 'utf8'));
+        } catch {
+          // corrupted ⇒ start fresh
+        }
+      }
+      const mapObj = wrapper.map ?? wrapper;
+      this.kb = new Map(Object.entries(mapObj));
+      this.receivedData = wrapper.receivedData ?? [];
+      this.hexHistory = (wrapper.hexHistory ?? []).filter(h => typeof h === 'string' && h.startsWith('#'));
+      this.predictedText = wrapper.predictedText ?? '';
+      this.modelReady = this.hexHistory.length >= 2;
     }
-    const mapObj = wrapper.map ?? wrapper;
 
-    this.kb = new Map(Object.entries(mapObj));
-    this.rawData = wrapper.rawData ?? [];
-    this.receivedData = wrapper.receivedData ?? [];
-    this.hexHistory = wrapper.hexHistory ?? [];
-    this.hexHistory = this.hexHistory.filter(
-      (h) => typeof h === 'string' && h.startsWith('#')
-    );
-    this.predictedText = wrapper.predictedText ?? '';
-    this.modelReady = this.hexHistory.length >= 2;
-
-    this.model.kbPath = kbPath;
+    // If we do have a disk‐backed KB, let the model know where to persist:
+    if (this.kbPath) {
+      this.model.kbPath = this.kbPath;
+    }
   }
 
   /* ───────── embedding helpers ───────── */
@@ -92,13 +111,14 @@ export class SemanticFramework {
       return tok;
     }
 
+    // If tok is of the form "<img:filename>" decode that image file into a latent vector:
     if (typeof tok === 'string' && tok.startsWith('<img:')) {
-      const fname = tok.slice(5, -1);                     // e.g. "frame_12345.jpg"
-      const abs = path.join(process.cwd(), '__tmp', fname);
-      return this.imgCodec.embed(abs);                    // returns latent array
+      const fname = tok.slice(5, -1); // e.g. "frame_12345.jpg"
+      const absPath = path.join(process.cwd(), '__tmp', fname);
+      return this.imgCodec.embed(absPath);
     }
 
-    // Otherwise tok is assumed to be a text token:
+    // Otherwise, treat tok as a text token and use the injected embedding:
     return this.embedding.embed(tok);
   }
 
@@ -113,7 +133,7 @@ export class SemanticFramework {
 
     for (const [hexKey, existingVec] of this.kb.entries()) {
       if (!Array.isArray(existingVec) || existingVec.length !== vec.length) {
-        continue; // skip if dimensionality mismatch (shouldn't happen if all vectors share dims)
+        continue;
       }
       const sim = cosineSimilarity(existingVec, vec);
       if (sim > bestSim) {
@@ -121,15 +141,12 @@ export class SemanticFramework {
         bestHex = hexKey;
       }
       if (bestSim >= threshold) {
-        // Once we hit the threshold exactly, we can stop early:
         return bestHex;
       }
     }
 
-    // After scanning, only return if bestSim ≥ threshold:
     return bestSim >= threshold ? bestHex : null;
   }
-
 
   /* ───────── internal KB register ───────── */
   _register(vectors) {
@@ -158,20 +175,17 @@ export class SemanticFramework {
     // 2a) Prepare an array to hold final hex for each token:
     const hexes = new Array(vecs.length);
     // 2b) Keep track of which indices/vecs must be registered from scratch
-    const toRegister = [];        // array of { index: i, vec: vecs[i] }
-    const newlyAssigned = {};     // map hex → true for those we’ll newly register
+    const toRegister = [];
+    const newlyAssigned = {};
 
     // 2c) For each vec: look for a cosine‐close match in this.kb
-    const SIM_THRESHOLD = 0.90; // tweak if you want “almost bit‐for‐bit” or “nearer”
+    const SIM_THRESHOLD = 0.90;
     for (let i = 0; i < vecs.length; i++) {
       const v = vecs[i];
-      // a) search by vector, not by hex
       const existingHex = this.findClosestHexByVector(v, SIM_THRESHOLD);
       if (existingHex) {
-        // “Close enough” latent found → reuse that hex
         hexes[i] = existingHex;
       } else {
-        // No match ⇒ mark this index to register after
         toRegister.push({ index: i, vec: v });
       }
     }
@@ -179,45 +193,36 @@ export class SemanticFramework {
     // 3) Register only the truly new vectors via _register()
     if (toRegister.length > 0) {
       const newVectors = toRegister.map(x => x.vec);
-      // _register(newVectors) will assign new hexes only for these
       const { hexes: regHexes, newKeys } = this._register(newVectors);
 
-      // Plug those newly assigned hexes back into the right slot in hexes[]
       for (let k = 0; k < toRegister.length; k++) {
         const idx = toRegister[k].index;
         const assignedHex = regHexes[k];
         hexes[idx] = assignedHex;
-        // mark that we created this one now:
         newlyAssigned[assignedHex] = true;
       }
     }
 
-    // 4) Log a timestamp+rawData entry exactly as before
-    const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
-    this.rawData.push(`[${stamp}] ${tokens.join(' ')}`);
-
-    // 5) Update hexHistory with every hex (old or new) and persist
+    // 5) Update hexHistory and persist
     this.hexHistory.push(...hexes);
     this._persist();
 
-    // 6) Build the payload: only those in newlyAssigned get [hex, vec], others remain hex‐only
+    // 6) Build the payload: newly assigned → [hex, vec], others → hex
     return hexes.map((h, i) => {
       if (newlyAssigned[h]) {
-        // newly created registration ⇒ send hex+vector so receiver can store/decode
         return [h, vecs[i]];
       } else {
-        // already existed in KB ⇒ send only the hex string
         return h;
       }
     });
   }
+
   /* ───────── RECEIVE (apprentice) ───────── */
   async receive(payload) {
     const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
-    const decodeTasks = []; // array of Promises that each write one PNG file
+    const decodeTasks = [];
 
     for (const item of payload) {
-      // — If item is [hex, vec], maybe‐store & decode
       if (
         Array.isArray(item) &&
         item.length === 2 &&
@@ -231,14 +236,12 @@ export class SemanticFramework {
           this.kb.set(hex, vec);
         }
 
-        // ➋ decode → PNG, but only if file doesn’t exist yet
+        // ➋ decode → PNG if file doesn’t exist
         const keyNoHash = hex.slice(1);
         const outPath = path.join(this.imgDir, `${keyNoHash}.png`);
-
         if (!fs.existsSync(outPath)) {
-          // schedule an async decode of `vec` → Buffer
           const task = this.decodeAsync(vec)
-            .then(pngBuf => ({ outPath, pngBuf, hex: keyNoHash }))
+            .then(pngBuf => ({ outPath, pngBuf }))
             .catch(err => {
               console.error(`Error decoding latent for ${hex}:`, err);
               return null;
@@ -248,37 +251,30 @@ export class SemanticFramework {
 
         // ➌ log receipt
         this.receivedData.push(`[${stamp}] <img:${keyNoHash}>`);
-      }
-
-      // — Else if item is just a bare "hex"
-      else if (typeof item === 'string') {
+      } else if (typeof item === 'string') {
         const hex = item;
         const vec = this.kb.get(hex);
-
         if (!Array.isArray(vec)) {
           console.warn(`DEBUG: no latent in KB for ${hex}, skipping decode.`);
           continue;
         }
         const keyNoHash = hex.slice(1);
         const outPath = path.join(this.imgDir, `${keyNoHash}.png`);
-
         if (!fs.existsSync(outPath)) {
-          // schedule an async decode
           const task = this.decodeAsync(vec)
-            .then(pngBuf => ({ outPath, pngBuf, hex: keyNoHash }))
+            .then(pngBuf => ({ outPath, pngBuf }))
             .catch(err => {
               console.error(`Error decoding cached latent for ${hex}:`, err);
               return null;
             });
           decodeTasks.push(task);
         }
-
         this.receivedData.push(`[${stamp}] <img:${keyNoHash}>`);
       }
-      // otherwise, ignore any other payload items
+      // ignore any other payload items
     }
 
-    // ➃ await *all* decodes in parallel, then write each Buffer
+    // ➃ write all decoded PNGs
     const results = await Promise.all(decodeTasks);
     for (const result of results) {
       if (result && result.pngBuf) {
@@ -316,7 +312,9 @@ export class SemanticFramework {
   /* ───────── PREDICT ───────── */
   predict(lastHex) {
     const prevVec = this.kb.get(lastHex);
-    if (!Array.isArray(prevVec)) throw new Error(`Unknown key ${lastHex}`);
+    if (!Array.isArray(prevVec)) {
+      throw new Error(`Unknown key ${lastHex}`);
+    }
 
     const rawNext = this.model.predict(prevVec);
     const word = this.devectorize(rawNext);
@@ -324,6 +322,7 @@ export class SemanticFramework {
 
     let hex = [...this.kb.entries()]
       .find(([, v]) => Array.isArray(v) && v.join(',') === canon.join(','))?.[0];
+
     if (!hex) {
       hex = nextHex(this.kb.keys());
       this.kb.set(hex, canon);
@@ -336,7 +335,6 @@ export class SemanticFramework {
   /* ───────── housekeeping ───────── */
   clear() {
     this.kb.clear();
-    this.rawData = [];
     this.receivedData = [];
     this.hexHistory = [];
     this.predictedText = '';
@@ -345,13 +343,13 @@ export class SemanticFramework {
   }
 
   _persist() {
+    if (!this.kbPath) return;
     fs.writeFileSync(this.kbPath, JSON.stringify(this.exportKB(), null, 2));
   }
 
   exportKB() {
     return {
       map: Object.fromEntries(this.kb),
-      rawData: this.rawData,
       receivedData: this.receivedData,
       hexHistory: this.hexHistory,
       predictedText: this.predictedText,

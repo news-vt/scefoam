@@ -56,7 +56,6 @@ def preprocess_pil_image(img: Image.Image) -> torch.FloatTensor:
     tensor = torch.from_numpy(arr).permute(2, 0, 1).unsqueeze(0)  # (1,3,512,512)
     return tensor.to(DEVICE)
 
-
 # ─────────────────── encode from a file path ───────────────────
 def encode_from_file(path: Path) -> list[float]:
     img = Image.open(path).convert("RGB")
