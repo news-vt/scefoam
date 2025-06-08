@@ -1,5 +1,5 @@
 {
-  "name": "etl_software_solution",
+  "name": "semantic_comm",
   "version": "1.0.0",
   "main": "src/server.js",
   "scripts": {
@@ -15,18 +15,23 @@
     }
   },
   "keywords": [],
-  "author": "Jean-Luc DeRieux, and Allen Chandler",
+  "author": "Jean-Luc DeRieux",
   "dependencies": {
+    "axios": "^1.9.0",
     "body-parser": "^1.20.3",
     "cors": "^2.8.5",
     "csv-parse": "^5.6.0",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
     "fast-csv": "^5.0.2",
+    "jpeg-js": "^0.4.4",
+    "node-fetch": "^3.3.2",
     "node-schedule": "^2.1.1",
+    "pixelmatch": "^7.1.0",
+    "pngjs": "^7.0.0",
+    "ssim.js": "^3.5.0",
     "supertest": "^7.1.1",
     "uuid": "^10.0.0",
-    "xlsx": "^0.18.5",
     "yargs": "^17.7.2"
   },
   "devDependencies": {

@@ -1,0 +1,14 @@
+Total encode time: 272.0 ms
+Total decode time: 363.6 ms
+Total encode time: 266.9 ms
+Total encode time: 270.2 ms
+Total encode time: 281.3 ms
+Total encode time: 294.6 ms
+Total decode time: 382.8 ms
+Total encode time: 277.3 ms
+Total encode time: 278.0 ms
+Total encode time: 484.6 ms
+Total encode time: 266.0 ms
+Total decode time: 358.6 ms
+Total encode time: 276.3 ms
+Total encode time: 279.8 ms

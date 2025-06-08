@@ -4,29 +4,29 @@
 // ──────────────────────────────────────────────────────────────
 // Express backend – latent‐only image transport, with auto‐created KB file
 // ──────────────────────────────────────────────────────────────
-import express           from 'express';
-import cors              from 'cors';
-import fs                from 'fs';
-import path              from 'path';
+import express from 'express';
+import cors from 'cors';
+import fs from 'fs';
+import path from 'path';
 import { fileURLToPath } from 'url';
-import { spawnSync }     from 'child_process';
+import { spawnSync } from 'child_process';
 const PY = process.env.PYTHON || 'python';
 
 import { SemanticFramework } from './SemanticFramework.js';
-import { TransformerModel }  from './model.js';
-import ImageCodec            from './image_embedding.js';
+import { TransformerModel } from './model.js';
+import ImageCodec from './image_embedding.js';
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname  = path.dirname(__filename);
+const __dirname = path.dirname(__filename);
 
 /* ───────── CLI port ───────── */
-const idx  = process.argv.indexOf('--port');
+const idx = process.argv.indexOf('--port');
 const PORT = idx !== -1 ? Number(process.argv[idx + 1]) : 3000;
 
 /* ───────── folders ───────── */
 const publicDir = path.join(__dirname, '..', 'public');
-const imgDir    = path.join(publicDir, 'images');
-const tmpDir    = path.join(process.cwd(), '__tmp'); // for temporary storage
+const imgDir = path.join(publicDir, 'images');
+const tmpDir = path.join(process.cwd(), '__tmp'); // for temporary storage
 
 for (const d of [publicDir, imgDir, tmpDir]) {
   fs.mkdirSync(d, { recursive: true });
@@ -54,10 +54,10 @@ const model = new TransformerModel({ kbPath: kbFile, port: PORT });
 
 /* ───────── CREATE SEMANTIC FRAMEWORK ───────── */
 const sf = new SemanticFramework({
-  kbPath:    kbFile,
+  kbPath: kbFile,
   embedding: imageEmbedding,
-  model:     model,
-  imgDir:    imgDir
+  model: model,
+  imgDir: imgDir
 });
 
 /* Helper to persist if disk‐backed */
@@ -88,17 +88,21 @@ app.post('/send', (req, res) => {
 
     let payload;
     if (imageData) {
-      // 1) Strip off “data:…;base64,” if present, then decode:
+      // 1) Strip off "data:…;base64," if present, then decode:
       const b64 = imageData.includes(',') ? imageData.split(',').pop() : imageData;
       const jpegBuffer = Buffer.from(b64, 'base64');
 
-      // 2) Spawn Python in “encode-bytes” mode, piping raw JPEG → stdin:
+      // Log raw JPEG size (in bytes) before encoding to latent:
+      const jpegSizeBytes = jpegBuffer.length;
+      console.log(`Image-size: ${jpegSizeBytes} bytes`);
+
+      // 2) Spawn Python in "encode-bytes" mode, piping raw JPEG → stdin:
       const script = path.join(__dirname, 'image_codec_diffusers.py');
       const proc = spawnSync(
         PY,
         [script, 'encode-bytes'],
         {
-          input:    jpegBuffer,
+          input: jpegBuffer,
           encoding: 'utf8',
           maxBuffer: 100_000_000
         }
@@ -126,6 +130,10 @@ app.post('/send', (req, res) => {
       const vec = sf.vectorize(text);
       payload = sf.send([vec]);
     }
+
+    // Log payload size (in bytes) to the server console:
+    const payloadSizeBytes = Buffer.byteLength(JSON.stringify(payload));
+    console.log(`Payload-size: ${payloadSizeBytes} bytes`);
 
     persist();
     return res.json({ ok: true, payload });
