@@ -1,0 +1,13 @@
+# Ignore node_modules
+node_modules/
+
+Semantic Framework/teacher-apprentice/src/glove.6B.100d.txt
+src/glove.6B.100d.txt
+glove.6B.100d.txt
+
+CLIP/
+flowtorch/
+__temp/
+
+vae_decoder.onnx
+vae_encoder.onnx

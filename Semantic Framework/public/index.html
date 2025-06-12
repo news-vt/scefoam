@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>Semantic Communication Dashboard</title>
+  <style>
+    :root {
+      --radius: 12px;
+      --border: #d0d4d9;
+      --bg-card: #f7f8fa;
+      --gap: 22px
+    }
+
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      margin: 20px;
+      max-width: 1500px
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: .8em
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 3px 8px rgba(0, 0, 0, .06);
+      padding: 24px;
+      margin-bottom: 40px
+    }
+
+    .card>h2 {
+      margin: 0 0 18px;
+      font-size: 1.3em;
+      text-align: center
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--gap)
+    }
+
+    .col {
+      display: flex;
+      flex-direction: column;
+      gap: var(--gap)
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: .4em
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 14px
+    }
+
+    label {
+      font-weight: bold;
+      font-size: .9em
+    }
+
+    input,
+    button {
+      font-size: 1em;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius)
+    }
+
+    input {
+      width: 100%;
+      box-sizing: border-box
+    }
+
+    button {
+      background: #fff;
+      cursor: pointer;
+      transition: .15s
+    }
+
+    button:hover {
+      background: #ebeff3
+    }
+
+    .panel {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px;
+      min-height: 140px;
+      white-space: pre-wrap;
+      overflow-y: auto
+    }
+
+    #modelBadge {
+      font-size: .75em;
+      padding: .25em .6em;
+      border-radius: 6px;
+      color: #fff;
+      background: #e67e22;
+      margin-left: 8px
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Semantic Communication Dashboard</h1>
+
+  <datalist id="peersList"></datalist>
+
+  <!-- ─────────── TEACHER ─────────── -->
+  <section class="card">
+    <h2>Teacher</h2>
+    <div class="grid">
+      <div class="col">
+
+        <!-- SEND ADDRESS -->
+        <div class="field">
+          <label for="sendAddr">SEND IP:PORT</label>
+          <input id="sendAddr" list="peersList" placeholder="e.g. localhost:3001">
+        </div>
+
+        <!-- LIVE CAMERA (only one localVideo) -->
+        <div class="field">
+          <label>LIVE CAMERA</label>
+          <video id="localVideo" autoplay muted style="width:100%;border-radius:var(--radius);background:#000"></video>
+        </div>
+        <div class="btn-row" style="margin-bottom:1em">
+          <button id="startCam">Start</button>
+          <button id="stopCam">Stop</button>
+        </div>
+
+        <!-- TEACHER KB -->
+        <div class="field">
+          <label>KNOWLEDGE BASE (HEX → EMBED)</label>
+          <div id="kbTeacher" class="panel">(loading…)</div>
+        </div>
+
+        <button id="clearBtn" style="background:#e74c3c;color:#fff;width:max-content">Clear KB</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────── APPRENTICE ─────────── -->
+  <section class="card">
+    <h2>Apprentice</h2>
+    <div class="grid">
+      <div class="col">
+        <div class="field">
+          <label for="myAddr">MY IP:PORT</label>
+          <input id="myAddr" readonly>
+        </div>
+
+        <!-- LIVE PREVIEW -->
+
+        <div class="field">
+          <label>LIVE PREVIEW</label>
+          <img id="imgFeed" style="max-width:100%;border-radius:var(--radius);background:#000">
+        </div>
+
+        <div class="field">
+          <label>RECEIVED DATA LOG</label>
+          <div id="receivedPanel" class="panel">(no teacher data yet)</div>
+        </div>
+
+        <div class="field">
+          <label>PREDICTED NEXT TOKEN</label>
+          <div id="predPanel" class="panel">(none yet)</div>
+        </div>
+
+        <div class="btn-row">
+          <button id="predictBtn">Predict</button>
+          <span id="modelBadge">training…</span>
+        </div>
+
+
+      </div>
+
+      <div class="col">
+        <div class="field">
+          <label>KNOWLEDGE BASE (HEX → EMBED)</label>
+          <div id="kbApprentice" class="panel">(none yet)</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    $('myAddr').value = location.host;
+
+    const kbTeacher = $('kbTeacher'), kbAppr = $('kbApprentice');
+    const recvPanel = $('receivedPanel'), predPanel = $('predPanel');
+    const badge = $('modelBadge'), imgFeed = $('imgFeed');
+    const NO_CACHE = { cache: 'no-store' };
+
+    function fmtKB(map) {
+      return Object.entries(map)
+        .map(([hex, vec]) => `${hex} : [${vec.slice(0, 5).map(n => n.toFixed(3)).join(', ')} …]`)
+        .join('\n') || '(empty)';
+    }
+
+    async function refresh() {
+      const r = await fetch('/knowledge_base', NO_CACHE);
+      if (!r.ok) return;
+      const j = await r.json();
+
+      kbTeacher.textContent = fmtKB(j.map);
+      kbAppr.textContent = fmtKB(j.map);
+      recvPanel.textContent = j.receivedData.join('\n') || '(no data yet)';
+      predPanel.textContent = j.predictedText || '(none yet)';
+      badge.textContent = j.modelReady ? 'ready' : 'training…';
+      badge.style.background = j.modelReady ? '#27ae60' : '#e67e22';
+
+      /* ── show latest frame if any ── */
+      if (j.latestImg) {
+        imgFeed.src = j.latestImg;
+      }
+    }
+    refresh();
+    setInterval(refresh, 5000);
+
+    /* ---------- TEXT SEND helper ---------- */
+    async function send() {
+      const txt = $('entryBox')?.value.trim();
+      if (!txt) return;
+      const peer = $('sendAddr').value.trim();
+
+      const local = await fetch('/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: txt })
+      }).then(r => r.json());
+
+      if (peer) {
+        const url = peer.startsWith('http') ? peer : `http://${peer}`;
+        await fetch(`${url}/receive`, {
+          mode: 'cors',
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ payload: local.payload })
+        }).catch(e => console.warn('forward failed', e.message));
+      }
+      if ($('entryBox')) $('entryBox').value = '';
+      refresh();
+    }
+
+    /* ---------- VIDEO CAPTURE (fixed loop) ---------- */
+   let stream, stopFlag = false, ctx;
+   const tiny = document.createElement('canvas');
+
+    async function startCam() {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        const vid = $('localVideo');
+        vid.srcObject = stream;
+        await vid.play();
+
+        // ── make the capture canvas the same size as the incoming frame
+        tiny.width = vid.videoWidth;
+        tiny.height = vid.videoHeight;
+        ctx = tiny.getContext('2d');
+      } catch (e) {
+        console.warn("camera error:", e);
+        return;
+      }
+
+      stopFlag = false;
+      loopCapture();
+    }
+    function stopCam() {
+      stopFlag = true;
+      if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+        stream = null;
+      }
+    }
+
+    async function loopCapture() {
+      if (stopFlag || !stream) return;
+
+      ctx.drawImage($('localVideo'), 0, 0, tiny.width, tiny.height);
+      const jpegB64 = tiny.toDataURL('image/jpeg', 1);
+
+      try {
+        const local = await fetch('/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageData: jpegB64 })
+        }).then(r => r.json());
+
+        refresh();
+
+        const peer = $('sendAddr').value.trim();
+        if (peer) {
+          const url = peer.startsWith('http') ? peer : `http://${peer}`;
+          await fetch(`${url}/receive`, {
+            mode: 'cors',
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ payload: local.payload })
+          }).catch(e => console.warn('forward failed', e.message));
+
+          refresh();
+        }
+      } catch (err) {
+        console.warn("captureFrame error:", err);
+      }
+
+      setTimeout(loopCapture, 300);
+    }
+
+    /* ─── wire up buttons ─── */
+    const startBtn = $('startCam');
+    const stopBtn = $('stopCam');
+    const sendBtn = $('sendBtn');
+    const entryBox = $('entryBox');
+    const clearBtn = $('clearBtn');
+    const predictBtn = $('predictBtn');
+
+    if (startBtn) startBtn.onclick = startCam;
+    if (stopBtn) stopBtn.onclick = stopCam;
+    if (sendBtn) sendBtn.onclick = send;
+    if (entryBox) entryBox.addEventListener('keypress', e => e.key === 'Enter' && send());
+    if (clearBtn) clearBtn.onclick = () => fetch('/clear', { method: 'POST' }).then(refresh);
+    if (predictBtn) predictBtn.onclick = () => fetch('/predict', { method: 'POST' }).then(refresh);
+  </script>
+
+</body>
+
+</html>

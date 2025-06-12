@@ -1,0 +1,117 @@
+[build-system]
+requires = ["flit_core>=3.2,<4", "setuptools"]
+build-backend = "flit_core.buildapi"
+
+# wheel~=0.40.0
+
+[project]
+name = "semantic-comm"
+authors = [{ name = "Jean-Luc DeRieux" }]
+requires-python = ">=3.8"
+dynamic = ["version", "description"]
+keywords = [
+  "sentence embeddings",
+  "sentence representation",
+  "sentence encoder",
+  "sonar models",
+  "speech2speech",
+  "text2text",
+  "speech2text",
+  "text2speech",
+  "multi-modal models",
+  "multi-language models",
+]
+
+# zip_safe = false
+classifiers = [
+  "Topic :: Scientific/Engineering",
+  "Development Status :: 4 - Beta",
+]
+
+dependencies = [
+  "fastapi>=0.95.0",           # your FastAPI server framework
+  "uvicorn[standard]>=0.23.0", # ASGI server for FastAPI
+  "numpy>=1.21",
+  "fairseq2>=0.3.0rc1", # installed with the cpu deps, if you want a gpu build, you need to install it manually
+  "numpy>=1.21",
+  "sox",
+  "soundfile",
+  "tqdm",
+  "overrides",
+  "typing_extensions",
+  "torch>=2.5.1",
+]
+
+[dependency-groups]
+dev = ["pytest-asyncio>=0.15.0", "pytest-cov>=2.6.1", "pytest>=4.3.0", "coverage[toml]>=5.1"]
+
+[project.optional-dependencies]
+cpu = [
+  "torch==2.5.1+cpu",
+  "torchaudio==2.5.1+cpu",
+  "fairseq2n==0.3.0rc1", 
+  "fairseq2[arrow]==0.3.0rc1", 
+]
+hg = [
+  "transformers>=4.44.0",
+  "datasets>=2.20.0",
+  "evaluate>=0.4.2",
+  "rouge_score>=0.1.2",
+  "nltk>=3.9",
+  "absl-py>=2.1.0",
+]
+jupyter = [
+  "notebook",
+  "ipykernel"
+]
+
+[project.urls]
+Source = "https://github.com/news-vt/semantic-video-communication"
+Tracker = "https://github.com/news-vt/semantic-video-communication/issues"
+
+[project.entry-points."fairseq2"]
+"fairseq2" = "sonar:setup_fairseq2"
+
+[tool.flit.module]      # <-- NEW-STYLE place for the import name
+name = "sonar"
+
+[tool.ruff]
+target-version = "py38"
+line-length = 88
+
+[tool.ruff.lint]
+ignore = ["E"]
+per-file-ignores = {"__init__.py"=["F401"]}
+
+[tool.mypy]
+python_version = "3.8"
+show_error_codes = true
+check_untyped_defs = true
+ignore_missing_imports = true
+
+files = ["sonar/"]
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+testpaths = ["tests/"]
+python_files = ["test_*.py"]
+
+[tool.uv.sources]
+fairseq2 = [
+  { index = "fairseq2-cpu", extra = 'cpu' }
+]
+fairseq2n = [
+  { index = "fairseq2-cpu", extra = 'cpu' }
+]
+torch={index="pytorch-cpu"}
+torchaudio={index="pytorch-cpu"}
+
+[[tool.uv.index]]
+name = "fairseq2-cpu"
+url = "https://fair.pkg.atmeta.com/fairseq2/whl/rc/pt2.5.1/cpu/"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
