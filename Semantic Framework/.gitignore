@@ -9,5 +9,11 @@ CLIP/
 flowtorch/
 __temp/
 
+src/__tests__/__test_data
+src/sonar/
+src/contra_bt5_small/
+__tmp_pred/
+
+
 vae_decoder.onnx
 vae_encoder.onnx

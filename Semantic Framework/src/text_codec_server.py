@@ -11,107 +11,130 @@ from typing import List
 import torch
 from fastapi import FastAPI, Body, HTTPException
 from fastapi.responses import JSONResponse
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 import uvicorn
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+from transformers.modeling_outputs import BaseModelOutput
 
 # ── silence spam ────────────────────────────────────────────────
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 logging.disable(logging.CRITICAL)
 warnings.filterwarnings("ignore")
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(SCRIPT_DIR, "contra_bt5_small")       # local folder
-EMB_SIZE   = 512
+MODEL_PATH = "facebook/bart-large"
+EMB_SIZE   = 1024    
 DEVICE     = "cuda" if torch.cuda.is_available() else "cpu"
 
 # ────────────────────────────────────────────────────────────────
 #  Bottleneck-T5 wrapper
 # ────────────────────────────────────────────────────────────────
-class BottleneckT5Autoencoder:
-    def __init__(self, path: str, device="cpu"):
+class T5Autoencoder:
+    def __init__(self, path: str = "facebook/bart-large", device="cpu"):
         self.device = device
+
+        # tokenizer stays the same
         self.tokenizer = AutoTokenizer.from_pretrained(
-            path, model_max_length=512, local_files_only=True
+            path, model_max_length=512
         )
-        self.model = AutoModelForCausalLM.from_pretrained(
-            path, trust_remote_code=True, local_files_only=True
+
+        # ⚠️ Use the Seq2SeqLM class, not the CausalLM one
+        self.model = AutoModelForSeq2SeqLM.from_pretrained(path
         ).to(self.device)
         self.model.eval()
 
-        # ---- PATCH: safe forward (handles cache_position, masks, etc.) -----
-        cls              = self.model.__class__
-        _orig_forward_fn = cls.forward
-        self._orig_forward = _orig_forward_fn.__get__(self.model, cls)
+        # ── NEW ── set these two so generate() can reference them
+        self.d_model = self.model.config.d_model                  # 512 for t5-small
+        self.decoder_start_token_id = self.model.config.decoder_start_token_id
 
-        def _safe_forward(model_self, *args, **kw):
-            kw.pop("cache_position", None)                         # 0️⃣ clean arg
 
-            # 1️⃣ guarantee attention_mask
-            if kw.get("attention_mask") is None:
-                bs, seq_len = 1, 1
-                enc_out = kw.get("encoder_outputs")
-                if enc_out is not None and getattr(enc_out, "last_hidden_state", None) is not None:
-                    seq_len = enc_out.last_hidden_state.shape[1]
-                    bs      = enc_out.last_hidden_state.shape[0]
-                else:
-                    ids = kw.get("input_ids") or kw.get("decoder_input_ids")
-                    if ids is not None:
-                        seq_len = ids.shape[1]
-                        bs      = ids.shape[0]
-                kw["attention_mask"] = torch.ones(
-                    bs, seq_len, dtype=torch.long, device=model_self.device
-                )
+    # def _safe_forward(model_self, *args, **kw):
+    #     kw.pop("cache_position", None)                         # 0️⃣ clean arg
 
-            # 2️⃣ fabricate encoder_outputs if absent
-            if kw.get("encoder_outputs") is None:
-                vec     = getattr(model_self, "perturb_vector", None)
-                d_model = model_self.config.d_model
-                bs, seq_len = kw["attention_mask"].shape
-                if vec is not None:
-                    hid = vec.view(1, 1, -1).expand(bs, seq_len, -1)
-                else:
-                    hid = torch.zeros(bs, seq_len, d_model, device=model_self.device)
-                from types import SimpleNamespace
-                kw["encoder_outputs"] = SimpleNamespace(last_hidden_state=hid)
+    #     # 1️⃣ guarantee attention_mask
+    #     if kw.get("attention_mask") is None:
+    #         bs, seq_len = 1, 1
+    #         enc_out = kw.get("encoder_outputs")
+    #         if enc_out is not None and getattr(enc_out, "last_hidden_state", None) is not None:
+    #             seq_len = enc_out.last_hidden_state.shape[1]
+    #             bs      = enc_out.last_hidden_state.shape[0]
+    #         else:
+    #             ids = kw.get("input_ids") or kw.get("decoder_input_ids")
+    #             if ids is not None:
+    #                 seq_len = ids.shape[1]
+    #                 bs      = ids.shape[0]
+    #         kw["attention_mask"] = torch.ones(
+    #             bs, seq_len, dtype=torch.long, device=model_self.device
+    #         )
 
-            return _orig_forward_fn(model_self, *args, **kw)
+    #     # 2️⃣ fabricate encoder_outputs if absent
+    #     if kw.get("encoder_outputs") is None:
+    #         vec     = getattr(model_self, "perturb_vector", None)
+    #         d_model = model_self.config.d_model
+    #         bs, seq_len = kw["attention_mask"].shape
+    #         if vec is not None:
+    #             hid = vec.view(1, 1, -1).expand(bs, seq_len, -1)
+    #         else:
+    #             hid = torch.zeros(bs, seq_len, d_model, device=model_self.device)
+    #         from types import SimpleNamespace
+    #         kw["encoder_outputs"] = SimpleNamespace(last_hidden_state=hid)
 
-        cls.forward = _safe_forward
-        # --------------------------------------------------------------------
+    #     return _orig_forward_fn(model_self, *args, **kw)
+
+    # cls.forward = _safe_forward
+    # # --------------------------------------------------------------------
 
     # ────────────────────────────────────────────────────────────────────
     #  Codec API
     # ────────────────────────────────────────────────────────────────────
     @torch.no_grad()
     def embed(self, text: str) -> torch.FloatTensor:
-        """Return 512-dim float32 latent for a **whole document**."""
-        inp = self.tokenizer(text, return_tensors="pt").to(self.device)
-        dec = self.tokenizer("",   return_tensors="pt").to(self.device)
-
-        lat = self._orig_forward(
-            **inp,
-            decoder_input_ids=dec["input_ids"],
-            encode_only=True
-        )[0]                       # (1, 512)
-        return lat.squeeze(0)      # (512,)
-
+        """
+        Return a 512-dim float32 latent for a whole document via mean-pool.
+        (Same signature as before.)
+        """
+        # tokenize + encode
+        inp = self.tokenizer(
+            text,
+            return_tensors="pt",
+            max_length=512,
+            truncation=True
+        ).to(self.device)
+        # get encoder hidden states: (1, seq_len, d_model)
+        # enc = self.model.get_encoder()(**inp).last_hidden_state
+        enc = self.model.model.encoder(**inp).last_hidden_state 
+        # mean-pool over tokens → (1, d_model) → (d_model,)
+        return enc.mean(dim=1).squeeze(0)
+    
     @torch.no_grad()
-    def generate(self, latent_f32: torch.Tensor, max_len=512, temp=1.0) -> str:
-        """Reconstruct text from float32 latent."""
-        dummy_txt  = "."
-        base_lat   = self.embed(dummy_txt)
-        self.model.perturb_vector = latent_f32 - base_lat
-        ids = self.tokenizer(dummy_txt, return_tensors="pt").to(self.device).input_ids
-        out = self.model.generate(
-            input_ids=ids,
+    def generate(self,
+                 latent_f32: torch.Tensor,
+                 max_len: int = 512,
+                 temp: float = 1.0
+                ) -> str:
+        """
+        Reconstruct text from a 512-dim latent (float32).
+        (Same signature as before.)
+        """
+        # expand latent to (1,1,d_model)
+        expanded = latent_f32.view(1, 1, self.d_model)
+        enc_out = BaseModelOutput(last_hidden_state=expanded)
+
+        # start from the decoder_start token
+        decoder_input_ids = torch.tensor(
+            [[self.decoder_start_token_id]],
+            device=self.device
+        )
+
+        out_ids = self.model.generate(
+            encoder_outputs=enc_out,
+            decoder_input_ids=decoder_input_ids,
             max_length=max_len,
             temperature=temp,
             top_p=0.9,
             do_sample=True,
-            use_cache=False,
+            use_cache=True,
         )
-        return self.tokenizer.decode(out[0], skip_special_tokens=True)
-
+        return self.tokenizer.decode(out_ids[0], skip_special_tokens=True)
 
 # ────────────────────────────────────────────────────────────────
 #  Helpers for int8 ⇄ float32
@@ -127,7 +150,7 @@ def dequantize_from_int8(lat_int8: List[int]) -> torch.FloatTensor:
     return arr / 127.0
 
 
-AE = BottleneckT5Autoencoder(MODEL_PATH, DEVICE)
+AE = T5Autoencoder(MODEL_PATH, DEVICE)
 
 # ────────────────────────────────────────────────────────────────
 #  FastAPI service

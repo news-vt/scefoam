@@ -2,3 +2,74 @@ tf-env/
 TopGun.mp4
 OurPlanet.mp4
 yolo11x-seg.pt
+
+Semantic Framework/__tmp/*
+*.json
+*.lock
+
+# Byte‐compiled / cache
+*.py[cod]
+__pycache__/
+
+# Backup & temp files
+*~
+*.bak
+*.tmp
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Databases
+*.sqlite
+*.db
+
+# Archives & packages
+*.7z
+*.dmg
+*.gz
+*.iso
+*.jar
+*.rar
+*.tar
+*.zip
+
+# Compiled object files & libraries
+*.o
+*.obj
+*.so
+*.dylib
+*.dll
+*.exe
+
+# macOS Finder
+.DS_Store
+
+# IDE / Editor settings
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+.idea/
+.vscode/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Node.js
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Python virtual environments
+venv/
+.env/
+
+
+# large binaries/videos we don’t want in Git
+/Semantic Framework/src/__tests__/__test_public/reconstructed_video.mp4
+
+# typescript bundles that are too big
+/Semantic Framework/src/vae_encode.ts
+/Semantic Framework/src/vae_decode.ts

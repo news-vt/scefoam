@@ -6,7 +6,7 @@ import sdot from '@stdlib/blas-base-sdot';
 import ImageCodec from './image_controller.js';
 import AudioCodec from './audio_controller.js';
 import TextCodec from './text_controller.js';
-import TransformerModel from './model.js';
+import PredictionController from './prediction_controller.js';
 
 /* ─── knobs ─── */
 const LATENT_FILE = 'latents.bin';
@@ -49,11 +49,9 @@ export default class SemanticFramework {
   constructor({
     kb = null,
     kbPath = 'knowledge_base.json',
-    model,
+    model = null,
     imgDir = path.join(process.cwd(), '__tmp')
   } = {}) {
-    if (!model) throw new Error('model instance required');
-
     fs.mkdirSync(imgDir, { recursive: true });
 
     this.imgCodec = new ImageCodec();
@@ -87,10 +85,46 @@ export default class SemanticFramework {
       this.modelReady = false;
     }
 
-    if (this.kbPath) this.model.kbPath = this.kbPath;
+    /* ---------------------------------------------------------------- *
+     * Tell the model where *both* persistence files are.
+     * Every model may ignore these, but PredictionController uses them.
+     * ---------------------------------------------------------------- */
+    if (model && typeof model === 'object') {
+      model.kbPath = this.kbPath;
+      model.latentsPath = path.join(path.dirname(this.kbPath), LATENT_FILE);
+    }
+
     this._ops = 0;
 
     this.tokenCache = new Map();
+  }
+
+
+  async predict(src, modality = 'text') {
+    if (!this.model || typeof this.model.predict !== 'function')
+      throw new Error('model lacks predict()');
+
+    const latent = (typeof src === 'string') ? this.vectorize(src) : src;
+    return (await this.model.predict(latent, modality));
+  }
+
+  // helper: accept a token or latent and always return a flat latent array
+  _latentFor(item) {
+    const raw = (typeof item === 'string' ||
+                 (Array.isArray(item) && typeof item[0] !== 'number'))
+                  ? this.vectorize(item)
+                  : item;
+
+    /* deep-flatten and cast typed arrays to plain lists */
+    const flat = (function f(v) {
+      if (ArrayBuffer.isView(v)) return Array.from(v);
+      if (Array.isArray(v))      return v.flatMap(f);
+      return [v];
+    })(raw);
+
+    return flat.length >= 512
+      ? flat.slice(0, 512)
+      : flat.concat(Array(512 - flat.length).fill(0));
   }
 
   /* ------ vector helpers ------ */
@@ -145,13 +179,6 @@ export default class SemanticFramework {
     return this._closest(toUnitF32(raw), thr);
   }
 
-  /* ------ storage helpers ------ */
-  // _add(hex, raw) {
-  //   const flat = Array.isArray(raw[0]) ? raw.flat() : raw;
-  //   this.kb.set(hex, appendRaw(this.latentFD, flat));
-  //   this.unitMap.set(hex, toUnitF32(flat));
-  // }
-
   /** Store a latent in the KB and return the record object */
   _add(hex, raw, mod = 'unknown') {
     const isMatrix = Array.isArray(raw[0]);          // text = matrix
@@ -167,6 +194,11 @@ export default class SemanticFramework {
 
     this.kb.set(hex, record);
     this.unitMap.set(hex, toUnitF32(flat));
+
+    if (typeof this.model?.refresh === 'function') {
+      this.model.refresh().catch(() => { });       // swallow if server busy
+    }
+
     return record;
   }
 
