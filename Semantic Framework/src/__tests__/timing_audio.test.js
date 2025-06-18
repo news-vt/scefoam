@@ -2,7 +2,6 @@
 const fs = require('fs');
 const path = require('path');
 const SemanticFramework = require('../SemanticFramework').default;
-const TransformerModel = require('../model').default;
 
 describe('SemanticFramework Audio & KB Performance', () => {
 
@@ -38,10 +37,8 @@ describe('SemanticFramework Audio & KB Performance', () => {
         fs.copyFileSync(sourceAudio1, tmpAudioPath1);
         fs.copyFileSync(sourceAudio2, tmpAudioPath2);
 
-        const model = new TransformerModel({ kbPath: kbFile, port: 9999 });
         sf = new SemanticFramework({
             kbPath: kbFile,
-            model
         });
     });
 

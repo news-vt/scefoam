@@ -2,7 +2,6 @@
 const fs   = require('fs');
 const path = require('path');
 const SemanticFramework = require('../SemanticFramework').default;
-const TransformerModel  = require('../model').default;
 
 describe('SemanticFramework Multimodal (Audio • Vision • Text)', () => {
 
@@ -40,8 +39,7 @@ describe('SemanticFramework Multimodal (Audio • Vision • Text)', () => {
   /* single SF instance for all three modalities */
   let sf;
   beforeAll(() => {
-    const model = new TransformerModel({ kbPath: kbFile, port: 9999 });
-    sf = new SemanticFramework({ kbPath: kbFile, model });
+    sf = new SemanticFramework({ kbPath: kbFile });
   });
 
   /* ───────────────────────────────── tests ─────────────────────────────────── */

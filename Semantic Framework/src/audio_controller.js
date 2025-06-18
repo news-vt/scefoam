@@ -1,140 +1,56 @@
-// audio_controller.js — pure ESM client for the flat-array audio VAE server
+// audio_controller.js – client for EnCodec Δ-forecaster (encode, decode, predict)
 import fs from "fs/promises";
 import path from "path";
 import { request, FormData } from "undici";
-import { Blob } from "buffer";
 import { spawnSync } from "child_process";
 
 export default class AudioCodec {
-  /**
-   * @param {object} opts
-   * @param {string} opts.baseURL  Base URL of the audio codec server
-   * @param {number} opts.timeout  Milliseconds before HTTP requests abort
-   */
   constructor({ baseURL = "http://127.0.0.1:8081", timeout = 30000 } = {}) {
-    this.base    = baseURL.replace(/\/$/, "");
+    this.base = baseURL.replace(/\/$/, "");
     this.timeout = timeout;
   }
 
-  /** Internal helper: parse JSON or throw with full text on error */
-  async _parseJsonOrThrow(res) {
-    const text = await res.body.text();
-    if (res.statusCode !== 200) {
-      throw new Error(`HTTP ${res.statusCode}: ${text}`);
-    }
-    try {
-      return JSON.parse(text);
-    } catch (err) {
-      throw new Error(`Invalid JSON response: ${text}`);
-    }
+  /* ---------- helpers ---------- */
+  async _json(res) {
+    const txt = await res.body.text();
+    if (res.statusCode !== 200) throw new Error(`HTTP ${res.statusCode}: ${txt}`);
+    return JSON.parse(txt);
   }
 
-  /** Legacy blocking path (curl) for test timing */
-  embed(absPath) {
-    const res = spawnSync(
-      "curl",
-      [
-        "-fsS", // fail on HTTP ≥400, stay silent on stdout
-        "-X", "POST",
-        "-H", "Content-Type: application/octet-stream",
-        "--data-binary", `@${absPath}`,
-        `${this.base}/encode`,
-      ],
-      { encoding: "utf8", maxBuffer: 200_000_000 }
-    );
-    if (res.status !== 0) {
-      const msg = (res.stderr || res.stdout || "curl failed").trim();
-      throw new Error(`curl error: ${msg}`);
-    }
-    try {
-      return JSON.parse(res.stdout.trim());
-    } catch {
-      throw new Error(`Invalid JSON response: ${res.stdout.trim()}`);
-    }
-  }
-
-  /** Async encode: send raw bytes (octet‐stream). */
-  async embedBytes(buf) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
-    let res;
-    try {
-      res = await request(
-        `${this.base}/encode`,
-        {
-          method: "POST",
-          body: buf,
-          headers: { "Content-Type": "application/octet-stream" },
-          signal: controller.signal
-        }
-      );
-    } catch (err) {
-      throw new Error(`Request failed: ${err.message}`);
-    } finally {
-      clearTimeout(timeoutId);
-    }
-    return this._parseJsonOrThrow(res);
-  }
-
-  /** Async helper: upload a local file via multipart/form-data. */
+  /* ---------- encode ---------- */
   async embedFile(absPath) {
     const buf = await fs.readFile(absPath);
     const form = new FormData();
-    // Undici accepts Buffer + filename directly
     form.append("file", buf, { filename: path.basename(absPath) });
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
-    let res;
-    try {
-      res = await request(
-        `${this.base}/encode`,
-        {
-          method: "POST",
-          body: form,
-          headers: form.headers,
-          signal: controller.signal
-        }
-      );
-    } catch (err) {
-      throw new Error(`Request failed: ${err.message}`);
-    } finally {
-      clearTimeout(timeoutId);
-    }
-    return this._parseJsonOrThrow(res);
+    const res = await request(`${this.base}/encode`, { method: "POST", body: form, headers: form.headers, timeout: this.timeout });
+    return this._json(res);
   }
 
-  /** Async decode flat-array → WAV Buffer */
+  embed(absPath) {                      // blocking curl variant
+    const { status, stdout, stderr } = spawnSync("curl", ["-fsS", "-X", "POST", "-H", "Content-Type: application/octet-stream", "--data-binary", `@${absPath}`, `${this.base}/encode`], { encoding: "utf8", maxBuffer: 200e6 });
+    if (status !== 0) throw new Error(stderr.trim() || "curl failed");
+    return JSON.parse(stdout.trim());
+  }
+
+  /* ---------- decode ---------- */
   async decode(vec) {
-    if (!Array.isArray(vec) || vec.length < 3) {
-      throw new Error("decode(): invalid payload");
-    }
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
-    let res;
-    try {
-      res = await request(
-        `${this.base}/decode`,
-        {
-          method: "POST",
-          body: Buffer.from(JSON.stringify(vec)),
-          headers: { "Content-Type": "application/json" },
-          signal: controller.signal
-        }
-      );
-    } catch (err) {
-      throw new Error(`Request failed: ${err.message}`);
-    } finally {
-      clearTimeout(timeoutId);
-    }
-    if (res.statusCode !== 200) {
-      const text = await res.body.text();
-      throw new Error(`decode failed (${res.statusCode}): ${text}`);
-    }
-    const chunks = [];
-    for await (const chunk of res.body) {
-      chunks.push(chunk);
-    }
+    const res = await request(`${this.base}/decode`, { method: "POST", body: JSON.stringify(vec), headers: { "Content-Type": "application/json" }, timeout: this.timeout });
+    if (res.statusCode !== 200) throw new Error(`decode failed (${res.statusCode})`);
+    const chunks = []; for await (const c of res.body) chunks.push(c);
     return Buffer.concat(chunks);
+  }
+
+  /* ---------- predict ---------- */
+  async predict(latent, wantWav = false) {
+    const url = `${this.base}/predict${wantWav ? "?wav=true" : ""}`;
+    const res = await request(url, { method: "POST", body: JSON.stringify({ vec: latent }), headers: { "Content-Type": "application/json" }, timeout: this.timeout });
+    const txt = await res.body.text();
+    if (res.statusCode !== 200) throw new Error(`predict failed (${res.statusCode}): ${txt}`);
+    const parsed = JSON.parse(txt);
+    if (wantWav && parsed.wav) {
+      const wavBuf = Buffer.from(parsed.wav.split(",")[1], "hex");
+      return { latent: parsed.latent, wav: wavBuf };
+    }
+    return parsed;                     // latent only
   }
 }

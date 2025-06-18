@@ -2,7 +2,6 @@
 const fs = require('fs');
 const path = require('path');
 const SemanticFramework = require('../SemanticFramework').default;
-const TransformerModel = require('../model');
 
 describe('SemanticFramework Image & KB Performance', () => {
 
@@ -27,8 +26,7 @@ describe('SemanticFramework Image & KB Performance', () => {
         }
         fs.copyFileSync(sourceImage1, tmpImagePath1);
         fs.copyFileSync(sourceImage2, tmpImagePath2);
-        const model = new TransformerModel({ kbPath: kbFile, port: 9999 });
-        sf = new SemanticFramework({ kbPath: kbFile, model });
+        sf = new SemanticFramework({ kbPath: kbFile });
     });
 
     test('embed image timing (1)', () => {
