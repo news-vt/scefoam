@@ -14,6 +14,5 @@ src/sonar/
 src/contra_bt5_small/
 __tmp_pred/
 
-
 vae_decoder.onnx
 vae_encoder.onnx

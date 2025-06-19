@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""
-image_codec_server.py – SD-VAE codec + Fast-Transformer forecaster
-──────────────────────────────────────────────────────────────────
-* Fast Former: global additive attention  → O(N d) memory/time
-* 2 encoder blocks, model_dim = 32, heads = 4
-* Online fine-tuning: 1 epoch of AdamW after every (t–1 → t) pair
-"""
-import argparse, logging, warnings, os, math, asyncio
+
+import os
+import warnings
+from torch.jit import TracerWarning
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["XFORMERS_MORE_DETAILS"] = "0"
+warnings.filterwarnings("ignore", category=TracerWarning)
+warnings.filterwarnings("ignore", message=".*.grad attribute of a Tensor that is not a leaf Tensor.*", category=UserWarning)
+
+import argparse, math, asyncio
 from io import BytesIO
 import numpy as np
 from PIL import Image
@@ -18,17 +20,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from diffusers import AutoencoderKL
 
-# ──────────────────────────────────────────────────
-#  Env + VAE
-# ──────────────────────────────────────────────────
-os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
-logging.disable(logging.CRITICAL)
-warnings.filterwarnings("ignore")
 DEVICE    = "cuda" if torch.cuda.is_available() else "cpu"
 LATENT_CH = 4
-print("Loading VAE …")
 VAE = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-ema").to(DEVICE).eval()
-print("VAE loaded")
 
 class _Enc(nn.Module):
     def __init__(self, vae): super().__init__(); self.vae=vae
@@ -41,9 +35,6 @@ scripted_encode = torch.jit.trace(_Enc(VAE).to(DEVICE),_ex,strict=False)
 _lat_demo = scripted_encode(_ex)
 scripted_decode = torch.jit.trace(_Dec(VAE).to(DEVICE),_lat_demo,strict=False)
 
-# ──────────────────────────────────────────────────
-#  IO helpers
-# ──────────────────────────────────────────────────
 def _pre(img: Image.Image):
     img=img.resize((512,512),Image.LANCZOS)
     arr=np.asarray(img,dtype=np.float32)/127.5-1.0
@@ -113,9 +104,6 @@ class FastFormerBlock(nn.Module):
         return x
 
 class LatentFastFormer(nn.Module):
-    """
-    Token = 4-chan cell; positional enc = learned (small ds range)
-    """
     def __init__(self, ds, layers=2, d_model=32, n_heads=4):
         super().__init__()
         self.ds=ds; S=ds*ds
@@ -135,9 +123,6 @@ class LatentFastFormer(nn.Module):
                          .permute(0,3,1,2).reshape(B,D)
         return out
 
-# ──────────────────────────────────────────────────
-#  Online training scaffolding
-# ──────────────────────────────────────────────────
 HISTORY=[]
 MODEL=None; OPT=None; LOSS=nn.MSELoss()
 LR=3e-4; EPOCHS=10; TRAIN_LOCK=asyncio.Lock()
@@ -174,9 +159,7 @@ def _forecast(vec, want_jpeg=False):
     next_vec=[w,h]+nxt.cpu().tolist()
     return (next_vec,_decode(next_vec)) if want_jpeg else (next_vec,None)
 
-# ──────────────────────────────────────────────────
-#  FastAPI
-# ──────────────────────────────────────────────────
+
 app=FastAPI(title="SD-VAE codec + FastFormer",docs_url=None,redoc_url=None)
 
 @app.post("/encode")
@@ -207,7 +190,6 @@ async def predict_ep(vec:list=Body(...,embed=True),jpeg:bool=False):
                              BytesIO(img_bytes).getvalue().hex()})
     return JSONResponse(next_vec)
 
-# ──────────────────────────────────────────────────
 if __name__=="__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="0.0.0.0")

@@ -1,15 +1,8 @@
 #!/usr/bin/env python3
-"""
-Contra-BT5 text codec
-─────────────────────
-* 1024-dim latent  →  int8  (-4 × size)
-* Fully backward-compatible: reconstruction still uses float32.
-* NEW: online Fast-Former that learns to forecast the *next* latent
-       plus a /predict endpoint mirroring the image codec.
-"""
-import argparse, logging, warnings, os, traceback, asyncio
-from typing import List
 
+# Imports
+import argparse, traceback, asyncio
+from typing import List
 import torch
 import torch.nn as nn
 from fastapi import FastAPI, Body, HTTPException
@@ -17,18 +10,13 @@ from fastapi.responses import JSONResponse
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from transformers.modeling_outputs import BaseModelOutput
 import uvicorn
-from image_codec_server import GlobalAdditiveAttn          # re-use
+from image_codec_server import GlobalAdditiveAttn 
 
-# ────────────────────────────────────────────────────────────────
-#  Constants
-# ────────────────────────────────────────────────────────────────
+# Constants
 MODEL_PATH = "facebook/bart-large"
 EMB_SIZE   = 1024
 DEVICE     = "cuda" if torch.cuda.is_available() else "cpu"
 
-# ────────────────────────────────────────────────────────────────
-#  Bottleneck-T5 auto-encoder
-# ────────────────────────────────────────────────────────────────
 class T5Autoencoder:
     def __init__(self, path: str = "facebook/bart-large", device="cpu"):
         self.device = device
@@ -99,10 +87,7 @@ class T5Autoencoder:
             use_cache=True,
         )
         return self.tokenizer.decode(out_ids[0], skip_special_tokens=True)
-    
-# ────────────────────────────────────────────────────────────────
-#  Helpers for int8 ⇆ float32
-# ────────────────────────────────────────────────────────────────
+
 def quantize_to_int8(lat_f32: torch.Tensor) -> List[int]:
     return (lat_f32.clamp(-1, 1) * 127).round().to(torch.int8).tolist()
 
@@ -111,9 +96,6 @@ def dequantize_from_int8(lat_int8: List[int]) -> torch.FloatTensor:
 
 AE = T5Autoencoder(MODEL_PATH, DEVICE)
 
-# ────────────────────────────────────────────────────────────────
-#  Online Fast-Former forecaster (self-supervised, 1-step ahead)
-# ────────────────────────────────────────────────────────────────
 HISTORY : list[torch.Tensor] = []
 MODEL   : nn.Module | None = None
 OPT     : torch.optim.Optimizer | None = None
@@ -189,9 +171,6 @@ def _forecast(vec_int8: list[int], want_text: bool = False):
     txt = AE.generate(nxt_f32) if want_text else None
     return nxt_int8, txt
 
-# ────────────────────────────────────────────────────────────────
-#  FastAPI service
-# ────────────────────────────────────────────────────────────────
 app = FastAPI(title="Contra-BT5-small codec (int8 latent)",
               docs_url=None, redoc_url=None)
 
@@ -211,9 +190,9 @@ async def decode(embeddings: List[List[int]] = Body(..., embed=True)):
             if len(vec) != EMB_SIZE:
                 raise HTTPException(400, f"Each embedding must be {EMB_SIZE} numbers")
             lat_f32 = dequantize_from_int8(vec)
-            HISTORY.append(lat_f32)               # ★ stash for training
+            HISTORY.append(lat_f32)              
             outs.append(AE.generate(lat_f32))
-        asyncio.create_task(_maybe_train())       # ★ fire & forget
+        asyncio.create_task(_maybe_train())     
         return JSONResponse(outs)
     except HTTPException:
         raise
@@ -221,9 +200,7 @@ async def decode(embeddings: List[List[int]] = Body(..., embed=True)):
         traceback.print_exc(); raise HTTPException(500, f"Decode error: {e}")
 
 @app.post("/predict")
-async def predict_ep(vec: List[int] = Body(..., embed=True),
-                     text: bool = False):
-    """Forecast next latent; add ?text=true to also get decoded sentence."""
+async def predict_ep(vec: List[int] = Body(..., embed=True), text: bool = False):
     try:
         nxt, sent = _forecast(vec, text)
         return (JSONResponse({"latent": nxt, "text": sent})
@@ -233,7 +210,6 @@ async def predict_ep(vec: List[int] = Body(..., embed=True),
     except Exception as e:
         traceback.print_exc(); raise HTTPException(500, f"Predict error: {e}")
 
-# ────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="0.0.0.0")
