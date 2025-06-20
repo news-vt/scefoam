@@ -31,22 +31,22 @@ describe('SemanticFramework Image & KB Performance', () => {
 
     test('embed text timing (1)', () => {
         console.time('embed-text');
-        const vec = sf.vectorize(`<text:${textName1}>`);
+        const vec = sf.encode_vec(`<text:${textName1}>`);
         console.timeEnd('embed-text');
         expect(Array.isArray(vec)).toBe(true);
     });
 
     test('embed text timing (2)', () => {
         console.time('embed-text');
-        const vec = sf.vectorize(`<text:${textName2}>`);
+        const vec = sf.encode_vec(`<text:${textName2}>`);
         console.timeEnd('embed-text');
         expect(Array.isArray(vec)).toBe(true);
     });
 
     test('reconstruct text timing and save (1)', async () => {
-        const vec = sf.vectorize(`<text:${textName1}>`);
+        const vec = sf.encode_vec(`<text:${textName1}>`);
         console.time('reconstruct-text');
-        const buf = await sf.decodeAsync(vec);
+        const buf = await sf.decode_vec(vec);
         console.timeEnd('reconstruct-text');
         const outPath = path.join(publicDir, 'reconstructed_' + textName1);
         fs.writeFileSync(outPath, buf);
@@ -54,9 +54,9 @@ describe('SemanticFramework Image & KB Performance', () => {
     }, 1_000_000);
 
     // test('reconstruct text timing and save (2)', async () => {
-    //     const vec = sf.vectorize(`<text:${textName2}>`);
+    //     const vec = sf.encode_vec(`<text:${textName2}>`);
     //     console.time('reconstruct-text');
-    //     const buf = await sf.decodeAsync(vec);
+    //     const buf = await sf.decode_vec(vec);
     //     console.timeEnd('reconstruct-text');
     //     const outPath = path.join(publicDir, 'reconstructed_' + textName2);
     //     fs.writeFileSync(outPath, buf);
@@ -64,7 +64,7 @@ describe('SemanticFramework Image & KB Performance', () => {
     // }, 1_000_000);
 
     test('sift KB timing (1)', () => {
-        const vec = sf.vectorize(`<text:${textName1}>`);
+        const vec = sf.encode_vec(`<text:${textName1}>`);
         sf._register([vec]);
         console.time('sift-kb');
         sf.findClosestHexByVector(vec);
@@ -72,7 +72,7 @@ describe('SemanticFramework Image & KB Performance', () => {
     });
 
     test('sift KB timing (2)', () => {
-        const vec = sf.vectorize(`<text:${textName2}>`);
+        const vec = sf.encode_vec(`<text:${textName2}>`);
         sf._register([vec]);
         console.time('sift-kb');
         sf.findClosestHexByVector(vec);
@@ -85,11 +85,11 @@ describe('SemanticFramework Image & KB Performance', () => {
            1.  make sure we have: original file, latent vector, and
                reconstructed file on disk
         --------------------------------------------------------- */
-        const vec = sf.vectorize(`<text:${textName1}>`);
+        const vec = sf.encode_vec(`<text:${textName1}>`);
         const reconPath = path.join(publicDir, 'reconstructed_' + textName1);
 
         if (!fs.existsSync(reconPath)) {
-            const buf = await sf.decodeAsync(vec);      // write only once
+            const buf = await sf.decode_vec(vec);      // write only once
             fs.writeFileSync(reconPath, buf);
         }
 

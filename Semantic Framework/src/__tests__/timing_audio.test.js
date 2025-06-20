@@ -44,22 +44,22 @@ describe('SemanticFramework Audio & KB Performance', () => {
 
     test('embed audio timing (1)', () => {
         console.time('embed-audio');
-        const vec = sf.vectorize(`<audio:${audioName1}>`);
+        const vec = sf.encode_vec(`<audio:${audioName1}>`);
         console.timeEnd('embed-audio');
         expect(Array.isArray(vec)).toBe(true);
     });
 
     test('embed audio timing (2)', () => {
         console.time('embed-audio');
-        const vec = sf.vectorize(`<audio:${audioName2}>`);
+        const vec = sf.encode_vec(`<audio:${audioName2}>`);
         console.timeEnd('embed-audio');
         expect(Array.isArray(vec)).toBe(true);
     });
 
     test('reconstruct audio timing and save (1)', async () => {
-        const vec = sf.vectorize(`<audio:${audioName1}>`);
+        const vec = sf.encode_vec(`<audio:${audioName1}>`);
         console.time('reconstruct-audio');
-        const buf = await sf.decodeAsync(vec);
+        const buf = await sf.decode_vec(vec);
         console.timeEnd('reconstruct-audio');
         const outName = audioName1.replace(/\.mp3$/, '.wav');
         const outPath = path.join(publicDir, 'reconstructed_' + outName);
@@ -68,9 +68,9 @@ describe('SemanticFramework Audio & KB Performance', () => {
     });
 
     test('reconstruct audio timing and save (2)', async () => {
-        const vec = sf.vectorize(`<audio:${audioName2}>`);
+        const vec = sf.encode_vec(`<audio:${audioName2}>`);
         console.time('reconstruct-audio');
-        const buf = await sf.decodeAsync(vec);
+        const buf = await sf.decode_vec(vec);
         console.timeEnd('reconstruct-audio');
         const outName = audioName2.replace(/\.mp3$/, '.wav');
         const outPath = path.join(publicDir, 'reconstructed_' + outName);
@@ -79,7 +79,7 @@ describe('SemanticFramework Audio & KB Performance', () => {
     });
 
     test('sift KB timing (1)', () => {
-        const vec = sf.vectorize(`<audio:${audioName1}>`);
+        const vec = sf.encode_vec(`<audio:${audioName1}>`);
         sf._register([vec]);
         console.time('sift-kb');
         sf.findClosestHexByVector(vec);
@@ -87,7 +87,7 @@ describe('SemanticFramework Audio & KB Performance', () => {
     });
 
     test('sift KB timing (2)', () => {
-        const vec = sf.vectorize(`<audio:${audioName2}>`);
+        const vec = sf.encode_vec(`<audio:${audioName2}>`);
         sf._register([vec]);
         console.time('sift-kb');
         sf.findClosestHexByVector(vec);
@@ -99,7 +99,7 @@ describe('SemanticFramework Audio & KB Performance', () => {
         const origSize = fs.statSync(tmpAudioPath1).size;
 
         // Latent JSON size
-        const vec = sf.vectorize(`<audio:${audioName1}>`);
+        const vec = sf.encode_vec(`<audio:${audioName1}>`);
         const latentSize = Buffer.byteLength(JSON.stringify(vec), 'utf8');
 
         // Reconstructed WAV size (replace .mp3 → .wav)

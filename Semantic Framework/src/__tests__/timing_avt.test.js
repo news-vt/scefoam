@@ -48,7 +48,7 @@ describe('SemanticFramework Multimodal (Audio • Vision • Text)', () => {
     for (const [kind, fn] of Object.entries(files)) {
       const tag = kind === 'img' ? 'img' : kind;        // audio|text stay the same
       console.time(`embed-${kind}`);
-      const vec = sf.vectorize(`<${tag}:${fn}>`);
+      const vec = sf.encode_vec(`<${tag}:${fn}>`);
       console.timeEnd(`embed-${kind}`);
       expect(Array.isArray(vec)).toBe(true);
       // cache in KB for later retrieval test
@@ -59,10 +59,10 @@ describe('SemanticFramework Multimodal (Audio • Vision • Text)', () => {
   test('reconstruct each modality & save', async () => {
     for (const [kind, fn] of Object.entries(files)) {
       const tag = kind === 'img' ? 'img' : kind;
-      const vec = sf.vectorize(`<${tag}:${fn}>`);
+      const vec = sf.encode_vec(`<${tag}:${fn}>`);
 
       console.time(`recon-${kind}`);
-      const buf = await sf.decodeAsync(vec);
+      const buf = await sf.decode_vec(vec);
       console.timeEnd(`recon-${kind}`);
 
       /* pick sensible output extension per type */
@@ -78,7 +78,7 @@ describe('SemanticFramework Multimodal (Audio • Vision • Text)', () => {
 
   test('KB lookup across modalities', () => {
     /* take text vector, ask KB for closest, expect itself back quickly */
-    const textVec = sf.vectorize(`<text:${files.text}>`);
+    const textVec = sf.encode_vec(`<text:${files.text}>`);
     console.time('sift-kb-multimodal');
     const nearest = sf.findClosestHexByVector(textVec);
     console.timeEnd('sift-kb-multimodal');

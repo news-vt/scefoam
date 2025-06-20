@@ -65,14 +65,14 @@ test('embed & reconstruct originals once', async () => {
   for (const src of [files.audio1, files.audio2]) {
     const tok   = `<audio:${src}>`;
 
-    // ① embed (vectorize) the local MP3 → latent
+    // ① embed (encode_vec) the local MP3 → latent
     console.time(`embed-${src}`);
-    const latent = test_sf.vectorize(tok);          // sync
+    const latent = test_sf.encode_vec(tok);          // sync
     console.timeEnd(`embed-${src}`);
 
     // ② decode latent back to WAV
     console.time(`reconstruct-${src}`);
-    const wavBuf = await test_sf.decodeAsync(latent);   // async
+    const wavBuf = await test_sf.decode_vec(latent);   // async
     console.timeEnd(`reconstruct-${src}`);
 
     // ③ save for manual listening

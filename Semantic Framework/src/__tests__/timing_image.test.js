@@ -31,22 +31,22 @@ describe('SemanticFramework Image & KB Performance', () => {
 
     test('embed image timing (1)', () => {
         console.time('embed-image');
-        const vec = sf.vectorize(`<img:${imageName1}>`);
+        const vec = sf.encode_vec(`<img:${imageName1}>`);
         console.timeEnd('embed-image');
         expect(Array.isArray(vec)).toBe(true);
     });
 
     test('embed image timing (2)', () => {
         console.time('embed-image');
-        const vec = sf.vectorize(`<img:${imageName2}>`);
+        const vec = sf.encode_vec(`<img:${imageName2}>`);
         console.timeEnd('embed-image');
         expect(Array.isArray(vec)).toBe(true);
     });
 
     test('reconstruct image timing and save (1)', async () => {
-        const vec = sf.vectorize(`<img:${imageName1}>`);
+        const vec = sf.encode_vec(`<img:${imageName1}>`);
         console.time('reconstruct-image');
-        const buf = await sf.decodeAsync(vec);
+        const buf = await sf.decode_vec(vec);
         console.timeEnd('reconstruct-image');
         const outPath = path.join(publicDir, 'reconstructed_' + imageName1);
         fs.writeFileSync(outPath, buf);
@@ -54,9 +54,9 @@ describe('SemanticFramework Image & KB Performance', () => {
     });
 
     test('reconstruct image timing and save (2)', async () => {
-        const vec = sf.vectorize(`<img:${imageName2}>`);
+        const vec = sf.encode_vec(`<img:${imageName2}>`);
         console.time('reconstruct-image');
-        const buf = await sf.decodeAsync(vec);
+        const buf = await sf.decode_vec(vec);
         console.timeEnd('reconstruct-image');
         const outPath = path.join(publicDir, 'reconstructed_' + imageName2);
         fs.writeFileSync(outPath, buf);
@@ -64,7 +64,7 @@ describe('SemanticFramework Image & KB Performance', () => {
     });
 
     test('sift KB timing (1)', () => {
-        const vec = sf.vectorize(`<img:${imageName1}>`);
+        const vec = sf.encode_vec(`<img:${imageName1}>`);
         sf._register([vec]);
         console.time('sift-kb');
         sf.findClosestHexByVector(vec);
@@ -72,7 +72,7 @@ describe('SemanticFramework Image & KB Performance', () => {
     });
 
     test('sift KB timing (2)', () => {
-        const vec = sf.vectorize(`<img:${imageName2}>`);
+        const vec = sf.encode_vec(`<img:${imageName2}>`);
         sf._register([vec]);
         console.time('sift-kb');
         sf.findClosestHexByVector(vec);
@@ -82,7 +82,7 @@ describe('SemanticFramework Image & KB Performance', () => {
     // test('size and similarity metrics', () => {
     //     // File sizes
     //     const origSize = fs.statSync(tmpImagePath).size;
-    //     const vec = sf.vectorize(`<img:${imageName}>`);
+    //     const vec = sf.encode_vec(`<img:${imageName}>`);
     //     const latentSize = Buffer.byteLength(JSON.stringify(vec), 'utf8');
     //     const reconPath = path.join(publicDir, 'reconstructed_' + imageName);
     //     const reconSize = fs.statSync(reconPath).size;

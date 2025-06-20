@@ -1,6 +1,4 @@
-/* SemanticFramework.js – SIMD search + append-only store + multi-modal support
-   Updated: integrates ImageCodec.predict() for next-step image inference    */
-
+// Imports
 import fs from 'fs';
 import path from 'path';
 import sdot from '@stdlib/blas-base-sdot';
@@ -8,11 +6,13 @@ import ImageCodec from './image_controller.js';
 import AudioCodec from './audio_controller.js';
 import TextCodec from './text_controller.js';
 
-/* ─── knobs ─── */
-// const LATENT_FILE   = 'latents.bin';
+// Constants
 const PERSIST_EVERY = 0;
+const isImageToken = tok => typeof tok === 'string' && tok.startsWith('<img:');
+const isAudioToken = tok => typeof tok === 'string' && tok.startsWith('<audio:');
+const isTextToken = tok => typeof tok === 'string' && tok.startsWith('<text:');
 
-/* ─── helpers ─── */
+// Helper Methods
 const cosSim = (A, B) => sdot(A.length, A, 1, B, 1);
 const nextHex = keys => {
   let m = -1;
@@ -40,33 +40,24 @@ const readRaw = (fd, { offset, length }) => {
   fs.readSync(fd, buf, 0, buf.length, offset);
   return Array.from(new Float32Array(buf.buffer));
 };
-const isImageToken = tok => typeof tok === 'string' && tok.startsWith('<img:');
-const isAudioToken = tok => typeof tok === 'string' && tok.startsWith('<audio:');
-const isTextToken = tok => typeof tok === 'string' && tok.startsWith('<text:');
 
-/* ─── class ─── */
 export default class SemanticFramework {
   constructor({
-    kb = null,
     kbPath = 'knowledge_base.json',
-    model = null,
     imgDir = path.join(process.cwd(), '__tmp')
   } = {}) {
     fs.mkdirSync(imgDir, { recursive: true });
 
-    /* per-modality codecs (each now handles its own training + prediction) */
     this.imgCodec = new ImageCodec();
     this.audioCodec = new AudioCodec();
     this.textCodec = new TextCodec();
 
-    this.model = model;          // optional external language / meta model
     this.imgDir = imgDir;
 
-    this.kb = new Map();    // hex -> {offset,length,…}
-    this.unitMap = new Map();    // hex -> normalized vector
+    this.kb = new Map();
+    this.unitMap = new Map();
     this.kbPath = kbPath;
 
-    /* ── derive latent-blob filename from kbPath ─────────────────────── */
     const kbDir = path.dirname(kbPath);
     const kbBase = path.basename(kbPath, path.extname(kbPath));
     const latentFile = `${kbBase}_latents.bin`;
@@ -82,143 +73,70 @@ export default class SemanticFramework {
       }
       this.hexHistory = j.hexHistory ?? [];
       this.receivedData = j.receivedData ?? [];
-      this.predictedText = j.predictedText ?? '';
-      this.modelReady = j.modelReady ?? false;
     } else {
       this.hexHistory = [];
       this.receivedData = [];
-      this.predictedText = '';
-      this.modelReady = false;
-    }
-
-    /* Tell any external model where persistence files live */
-    if (model && typeof model === 'object') {
-      model.kbPath = this.kbPath;
-      model.latentsPath = path.join(kbDir, latentFile);
     }
 
     this._ops = 0;
     this.tokenCache = new Map();
   }
 
-  async predict(src, modality = "text", opts = {}) {
-    /* —— image ───────────────────────────────────────── */
-    if (modality === "image") {
-      const latent = Array.isArray(src) ? src : this.vectorize(src);
-      return this.imgCodec.predict(latent, !!opts.wantJPEG);
-    }
-
-    /* —— audio ───────────────────────────────────────── */
-    if (modality === "audio") {
-      const latent = Array.isArray(src) ? src : this.vectorize(src);
-      return this.audioCodec.predict(latent, !!opts.wantWav);
-    }
-
-    /* —— text ────────────────────────────────────────── */
-    if (modality === "text") {
-      const latent = Array.isArray(src) ? src : this.vectorize(src);
-      return this.textCodec.predict(latent, !!opts.wantText);
-    }
-
-    /* —— fallback to external model (other modalities) ─ */
-    if (!this.model || typeof this.model.predict !== "function")
-      throw new Error("model lacks predict()");
-    const latent = Array.isArray(src) ? src : this.vectorize(src);
-    return this.model.predict(latent, modality, opts);
-  }
-
-
-  /* helper: accept a token or latent and always return a flat latent array */
-  _latentFor(item) {
-    const raw = (typeof item === 'string' ||
-      (Array.isArray(item) && typeof item[0] !== 'number'))
-      ? this.vectorize(item)
-      : item;
-
-    /* deep-flatten and cast typed arrays to plain lists */
-    const flat = (function f(v) {
-      if (ArrayBuffer.isView(v)) return Array.from(v);
-      if (Array.isArray(v)) return v.flatMap(f);
-      return [v];
-    })(raw);
-
-    return flat.length >= 512
-      ? flat.slice(0, 512)
-      : flat.concat(Array(512 - flat.length).fill(0));
-  }
-
-  /* ------ vector helpers ------ */
-  vectorize(tok) {
-    /* latent already? */
+  // Public Methods
+  encode_vec(tok) {
     if (Array.isArray(tok)) return tok;
 
-    /* ---- image file ------------------------------------------------------- */
     if (isImageToken(tok)) {
       const fp = path.join(this.imgDir, tok.slice(5, -1));
       return this.imgCodec.embed(fp);
     }
 
-    /* ---- audio file ------------------------------------------------------- */
     if (isAudioToken(tok)) {
       const fp = path.join(this.imgDir, tok.slice(7, -1));
       return this.audioCodec.embed(fp);
     }
 
-    /* ---- text file -------------------------------------------------------- */
     if (isTextToken(tok)) {
       const fp = path.join(this.imgDir, tok.slice(6, -1));
       const text = fs.readFileSync(fp, 'utf8');
       return this.textCodec.embed(text);
     }
 
-    /* ---- plain text token ------------------------------------------------- */
     return this.textCodec.embed(tok);
   }
 
-  /* ------ fast cosine search ------ */
-  _closest(unit, thr) {
-    let best = -1, bHex = null;
-    for (const [h, u] of this.unitMap) {
-      if (u.length !== unit.length) continue;
-      const s = cosSim(u, unit);
-      if (s > best) { best = s; bHex = h; }
-      if (best >= thr) break;
+  async decode_vec(vec) {
+    if (!Array.isArray(vec)) throw new Error('decode_vec(): invalid vec');
+
+    if (vec.length === 3 && typeof vec[2] === 'string') {
+      const [, raw, mod] = vec;
+      if (mod === 'image') return this.imgCodec.decode(raw);
+      if (mod === 'audio') return this.audioCodec.decode(raw);
+      if (mod === 'text') {
+        const arr = await this.textCodec.decode(raw);
+        return Buffer.from(arr.join(' '), 'utf8');
+      }
+      throw new Error(`decode_vec(): unknown modality ${mod}`);
     }
-    return best >= thr ? bHex : null;
-  }
-  findClosestHexByVector(raw, thr = 0.999) {
-    return this._closest(toUnitF32(raw), thr);
-  }
 
-  /* … unchanged CRUD / send / receive / decode helpers follow … */
-  /* (everything below this comment is identical to your previous
-     SemanticFramework.js except for whitespace tweaks) */
+    const raw = vec;
+    if (raw.length === this.imgCodec.latentLength + 2)
+      return this.imgCodec.decode(raw);
 
-  /** Store a latent in the KB and return the record object */
-  _add(hex, raw, mod = 'unknown') {
-    const isMatrix = Array.isArray(raw[0]);
-    const flat = isMatrix ? raw.flat() : raw;
-    const rec = appendRaw(this.latentFD, flat);
-
-    const record = { ...rec, mod };
-    if (isMatrix) { record.rows = raw.length; record.cols = raw[0].length; }
-
-    this.kb.set(hex, record);
-    this.unitMap.set(hex, toUnitF32(flat));
-
-    if (typeof this.model?.refresh === 'function') {
-      this.model.refresh().catch(() => { });
+    if (Array.isArray(raw[0])) {
+      const arr = await this.textCodec.decode(raw);
+      return Buffer.from(arr.join(' '), 'utf8');
     }
-    return record;
+
+    try {
+      const any = await this.textCodec.decode(raw);
+      const arr = Array.isArray(any) ? any : [any];
+      return Buffer.from(arr.join(' '), 'utf8');
+    } catch {
+      return this.audioCodec.decode(raw);
+    }
   }
 
-  _register(raws) {
-    return raws.map(r => {
-      const h = nextHex(this.kb.keys()); this._add(h, r); return h;
-    });
-  }
-
-  /* ───────── Teacher side ───────── */
   send(tokens, thr = 0.999) {
     const payload = [];
 
@@ -228,7 +146,7 @@ export default class SemanticFramework {
         continue;
       }
 
-      const raw = this.vectorize(tok);
+      const raw = this.encode_vec(tok);
       const unit = toUnitF32(raw);
       const mod = isImageToken(tok) ? 'image'
         : isAudioToken(tok) ? 'audio' : 'text';
@@ -251,7 +169,6 @@ export default class SemanticFramework {
     return payload;
   }
 
-  /* ---------------- Apprentice ---------------- */
   async receive(packet) {
     const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
     const outs = [];
@@ -286,14 +203,91 @@ export default class SemanticFramework {
     return outs;
   }
 
-  /* helper */
+  async predict(src, modality = "text", opts = {}) {
+    if (modality === "image") {
+      const latent = Array.isArray(src) ? src : this.encode_vec(src);
+      return this.imgCodec.predict(latent, !!opts.wantJPEG);
+    }
+
+    if (modality === "audio") {
+      const latent = Array.isArray(src) ? src : this.encode_vec(src);
+      return this.audioCodec.predict(latent, !!opts.wantWav);
+    }
+
+    if (modality === "text") {
+      const latent = Array.isArray(src) ? src : this.encode_vec(src);
+      return this.textCodec.predict(latent, !!opts.wantText);
+    }
+
+    if (!this.model || typeof this.model.predict !== "function")
+      throw new Error("model lacks predict()");
+    const latent = Array.isArray(src) ? src : this.encode_vec(src);
+    return this.model.predict(latent, modality, opts);
+  }
+
+  findClosestHexByVector(raw, thr = 0.999) {
+    return this._closest(toUnitF32(raw), thr);
+  }
+
+  // Helper Functions
+  _latentFor(item) {
+    const raw = (typeof item === 'string' ||
+      (Array.isArray(item) && typeof item[0] !== 'number'))
+      ? this.encode_vec(item)
+      : item;
+
+    const flat = (function f(v) {
+      if (ArrayBuffer.isView(v)) return Array.from(v);
+      if (Array.isArray(v)) return v.flatMap(f);
+      return [v];
+    })(raw);
+
+    return flat.length >= 512
+      ? flat.slice(0, 512)
+      : flat.concat(Array(512 - flat.length).fill(0));
+  }
+
+  _closest(unit, thr) {
+    let best = -1, bHex = null;
+    for (const [h, u] of this.unitMap) {
+      if (u.length !== unit.length) continue;
+      const s = cosSim(u, unit);
+      if (s > best) { best = s; bHex = h; }
+      if (best >= thr) break;
+    }
+    return best >= thr ? bHex : null;
+  }
+
+  _add(hex, raw, mod = 'unknown') {
+    const isMatrix = Array.isArray(raw[0]);
+    const flat = isMatrix ? raw.flat() : raw;
+    const rec = appendRaw(this.latentFD, flat);
+
+    const record = { ...rec, mod };
+    if (isMatrix) { record.rows = raw.length; record.cols = raw[0].length; }
+
+    this.kb.set(hex, record);
+    this.unitMap.set(hex, toUnitF32(flat));
+
+    if (typeof this.model?.refresh === 'function') {
+      this.model.refresh().catch(() => { });
+    }
+    return record;
+  }
+
+  _register(raws) {
+    return raws.map(r => {
+      const h = nextHex(this.kb.keys()); this._add(h, r); return h;
+    });
+  }
+
   _decodeByMod(raw, mod) {
     if (mod === 'image') return this.imgCodec.decode(raw);
     if (mod === 'audio') return this.audioCodec.decode(raw);
+    if (mod === 'text') return this.textCodec.decode(raw);
     return this.textCodec.decode(raw);
   }
 
-  /* ---------------- persistence ---------------- */
   _persist(n) {
     if (!this.kbPath) return;
     if (PERSIST_EVERY && n % PERSIST_EVERY) return;
@@ -301,43 +295,8 @@ export default class SemanticFramework {
       map: Object.fromEntries(this.kb),
       hexHistory: this.hexHistory,
       receivedData: this.receivedData,
-      predictedText: this.predictedText,
-      modelReady: this.modelReady
     };
     fs.writeFileSync(this.kbPath, JSON.stringify(j, null, 2));
-  }
-
-  /* misc */
-  async decodeAsync(item) {
-    if (!Array.isArray(item)) throw new Error('decodeAsync(): invalid item');
-
-    if (item.length === 3 && typeof item[2] === 'string') {
-      const [, raw, mod] = item;
-      if (mod === 'image') return this.imgCodec.decode(raw);
-      if (mod === 'audio') return this.audioCodec.decode(raw);
-      if (mod === 'text') {
-        const arr = await this.textCodec.decode(raw);
-        return Buffer.from(arr.join(' '), 'utf8');
-      }
-      throw new Error(`decodeAsync(): unknown modality ${mod}`);
-    }
-
-    const raw = item;
-    if (raw.length === this.imgCodec.latentLength + 2)
-      return this.imgCodec.decode(raw);
-
-    if (Array.isArray(raw[0])) {
-      const arr = await this.textCodec.decode(raw);
-      return Buffer.from(arr.join(' '), 'utf8');
-    }
-
-    try {
-      const any = await this.textCodec.decode(raw);
-      const arr = Array.isArray(any) ? any : [any];
-      return Buffer.from(arr.join(' '), 'utf8');
-    } catch {
-      return this.audioCodec.decode(raw);
-    }
   }
 
   clear() {
