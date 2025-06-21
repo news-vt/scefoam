@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import os
+import sys
 import warnings
 from torch.jit import TracerWarning
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
@@ -195,5 +196,5 @@ if __name__=="__main__":
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8082)
     args = ap.parse_args()
-    print(f"Image Codec Ready on {DEVICE} – API: http://{args.host}:{args.port}")
+    print(f"Image Codec Ready on {DEVICE} – API: http://{args.host}:{args.port}", file=sys.stderr, flush=True)
     uvicorn.run(app,host=args.host,port=args.port,log_level="warning")

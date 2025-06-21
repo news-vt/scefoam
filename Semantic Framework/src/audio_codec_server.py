@@ -248,5 +248,5 @@ if __name__ == "__main__":
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=8081)
     args = p.parse_args()
-    print(f"Audio Codec Ready on {DEVICE} – API: http://{args.host}:{args.port}")
+    print(f"Audio Codec Ready on {DEVICE} – API: http://{args.host}:{args.port}", file=sys.stderr, flush=True)
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")

@@ -3,6 +3,7 @@
 # Imports
 import argparse, traceback, asyncio
 from typing import List
+import sys
 import torch
 import torch.nn as nn
 from fastapi import FastAPI, Body, HTTPException
@@ -215,5 +216,5 @@ if __name__ == "__main__":
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8080)
     args = ap.parse_args()
-    print(f"Text Codec Ready on {DEVICE} – API: http://{args.host}:{args.port}")
+    print(f"Text Codec Ready on {DEVICE} – API: http://{args.host}:{args.port}", file=sys.stderr, flush=True)
     uvicorn.run(app, host=args.host, port=args.port, workers=1, log_level="warning")
