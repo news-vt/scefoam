@@ -4,7 +4,6 @@ OurPlanet.mp4
 yolo11x-seg.pt
 
 Semantic Framework/__tmp/*
-*.json
 *.lock
 
 # Byte‐compiled / cache

@@ -25,9 +25,9 @@ wsl python3 src/audio_codec_server.py
 
 python3 -m uv pip install --extras cpu -e .
 
+wsl python3 -m uv run python3 src/text_codec_server.py
 
-
-
+wsl npm test -- --runInBand
 
 
 
@@ -39,3 +39,13 @@ EOF'
 
 
 sudo rm /etc/resolv.conf
+
+
+wsl python3 -m uv run python3 src/text_codec_server.py
+
+# Set up environment and install CPU dependencies
+uv sync --extra cpu --extra eval --extra data
+
+# For GPU support (example: Torch 2.5.1 + CUDA 12.1)
+uv pip install torch==2.5.1 --extra-index-url https://download.pytorch.org/whl/cu121 --upgrade
+uv pip install fairseq2==v0.3.0rc1 --pre --extra-index-url https://fair.pkg.atmeta.com/fairseq2/whl/rc/pt2.5.1/cu121 --upgrade
