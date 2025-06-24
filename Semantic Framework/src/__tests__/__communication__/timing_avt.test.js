@@ -1,13 +1,14 @@
 // timing_avt.test.js
 const fs   = require('fs');
 const path = require('path');
-const SemanticFramework = require('../SemanticFramework').default;
+const SemanticFramework = require('../../SemanticFramework').default;
 
 describe('SemanticFramework Multimodal (Audio • Vision • Text)', () => {
 
   /* ───────────────────────────── paths & fixtures ───────────────────────────── */
-  const publicDir = path.join(__dirname, '__test_public');
-  const dataDir   = path.join(__dirname, '__test_data');
+  const testRoot = path.resolve(__dirname, '..');
+  const publicDir = path.join(testRoot, '__test_public__');
+  const dataDir   = path.join(testRoot, '__test_data__');
   const tmpDir    = path.join(process.cwd(), '__tmp');
   const kbFile    = path.join(publicDir, 'knowledge_base_avt_test.json');
 

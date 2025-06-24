@@ -2,14 +2,15 @@
 
 const fs            = require('fs');
 const path          = require('path');
-const SemanticFramework = require('../SemanticFramework').default;
+const SemanticFramework = require('../../SemanticFramework').default;
 
 /* ─── plenty of time for audio decode / I-O ──────────────────────────── */
 jest.setTimeout(600_000);
 
 /* ─── fixtures & scratch paths ───────────────────────────────────────── */
-const publicDir = path.join(__dirname, '__test_public');
-const dataDir   = path.join(__dirname, '__test_data');
+const testRoot = path.resolve(__dirname, '..');
+const publicDir = path.join(testRoot, '__test_public__');
+const dataDir   = path.join(testRoot, '__test_data__');
 const tmpDir    = path.join(process.cwd(), '__tmp');
 
 const files = {
@@ -118,4 +119,22 @@ test('teacher → apprentice, twice (first with latents, then hex-only)', async 
   const outs2 = await apprentice.receive(payload2); // [decoded,*3]  (instant)
   console.timeEnd('receive-2');
   expect(outs2.length).toBe(tokens.length);
+
+  // /* outputs from 1st and 2nd pass must match byte-for-byte */
+  // outs1.forEach((buf1, idx) => {
+  //   const buf2 = outs2[idx];
+  //   if (Buffer.isBuffer(buf1) && Buffer.isBuffer(buf2)) {
+  //     expect(buf2.equals(buf1)).toBe(true);
+  //   } else {
+  //     expect(buf2).toEqual(buf1);
+  //   }
+  // });
+
+  // /* ── KB sanity on both sides ───────────────────────────────────────── */
+  // tokens.forEach(tok => {
+  //   const vec   = teacher.encode_vec(tok);
+  //   const hex   = teacher.findClosestHexByVector(vec, 0.9999);
+  //   const hexAp = apprentice.findClosestHexByVector(vec, 0.9999);
+  //   expect(hex).toBe(hexAp);
+  // });
 });

@@ -10,16 +10,16 @@
 
 const fs = require('fs');
 const path = require('path');
-const SemanticFramework = require('../SemanticFramework').default;
+const SemanticFramework = require('../../SemanticFramework').default;
 
 /* ─── config ─── */
 jest.setTimeout(900_000);
 const ITERATIONS = 20;  // change as you like, but 5 is a good start
 
 /* ─── paths ─── */
-const testRoot = __dirname;
-const dataDir = path.join(testRoot, '__test_data');
-const publicDir = path.join(testRoot, '__test_public');
+const testRoot = path.resolve(__dirname, '..');
+const dataDir = path.join(testRoot, '__test_data__');
+const publicDir = path.join(testRoot, '__test_public__');
 const tmpDir = path.join(process.cwd(), '__tmp_pred');
 
 const files = { audio1: 'test_audio_1.mp3', audio2: 'test_audio_2.mp3' };

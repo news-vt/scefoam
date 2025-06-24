@@ -5,14 +5,11 @@ Semantic Framework/teacher-apprentice/src/glove.6B.100d.txt
 src/glove.6B.100d.txt
 glove.6B.100d.txt
 
-CLIP/
 flowtorch/
 __temp/
-
-src/__tests__/__test_data
-src/sonar/
-src/contra_bt5_small/
 __tmp_pred/
 
-vae_decoder.onnx
-vae_encoder.onnx
+src/__tests__/__test_public__/
+src/__tests__/__test_data__
+src/__tests__/__result__
+src/sonar/

@@ -31,11 +31,11 @@ trap '
   exit 0
 ' INT TERM
 
-# 4) Server list
+# 4) Server list (now including text)
 declare -A SERVERS=(
-  [text]=src/text_codec_server.py
-  [audio]=src/audio_codec_server.py
-  [image]=src/image_codec_server.py
+  [text]=src/text_codec_server.py    # run with uv run
+  [audio]=src/audio_codec_server.py  # plain python
+  [image]=src/image_codec_server.py  # plain python
 )
 
 # 5) Launch each one
@@ -47,13 +47,21 @@ for name in "${!SERVERS[@]}"; do
   {
     echo "======================================"
     echo "[START] $(date): Launching ${name} codec server"
-    echo "Command: python3 ${script}"
+    if [[ "$name" == "text" ]]; then
+      echo "Command: python3 -m uv run python3 ${script}"
+    else
+      echo "Command: python3 -u ${script}"
+    fi
     echo "Log file: ${logfile}"
     echo "--------------------------------------"
   } >> "$logfile"
 
   # Start in background
-  python3 -u "$script" >> "$logfile" 2>&1 &
+  if [[ "$name" == "text" ]]; then
+    python3 -m uv run python3 "$script" >> "$logfile" 2>&1 &
+  else
+    python3 -u "$script" >> "$logfile" 2>&1 &
+  fi
 
   pid=$!
   echo "[PID] ${name} server = $pid" >> "$logfile"

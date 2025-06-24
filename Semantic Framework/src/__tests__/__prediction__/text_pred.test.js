@@ -11,16 +11,17 @@
 
 const fs   = require('fs');
 const path = require('path');
-const SemanticFramework = require('../SemanticFramework').default;
+const SemanticFramework = require('../../SemanticFramework').default;
 
 /* ─── config ─── */
 jest.setTimeout(600_000);
 const ITERATIONS = 4;
 
 /* ─── paths ─── */
-const testRoot  = __dirname;
-const dataDir   = path.join(testRoot, '__test_data');
-const publicDir = path.join(testRoot, '__test_public');
+const testRoot = path.resolve(__dirname, '..');
+
+const dataDir   = path.join(testRoot, '__test_data__');
+const publicDir = path.join(testRoot, '__test_public__');
 const tmpDir    = path.join(process.cwd(), '__tmp_pred');
 
 const files = { text1: 'test_text_1.txt', text2: 'test_text_2.txt' };

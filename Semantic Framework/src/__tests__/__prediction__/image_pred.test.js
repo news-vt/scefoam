@@ -7,21 +7,21 @@
  *   even i ⇒ teacher sends [img2,img1], predict from img2
  *
  * Predicted JPEGs are written to
- *   __tests__/__test_public/predicted_image_iter<i>_<dir>.jpg
+ *   __tests__/__test_public__/predicted_image_iter<i>_<dir>.jpg
  */
 
 const fs   = require('fs');
 const path = require('path');
-const SemanticFramework = require('../SemanticFramework').default;
+const SemanticFramework = require('../../SemanticFramework').default;
 
 /* ─── config ─── */
 jest.setTimeout(900_000);
 const ITERATIONS = 2;                 // change as you like
 
 /* ─── paths ─── */
-const testRoot  = __dirname;
-const dataDir   = path.join(testRoot, '__test_data');
-const publicDir = path.join(testRoot, '__test_public');
+const testRoot = path.resolve(__dirname, '..');
+const dataDir   = path.join(testRoot, '__test_data__');
+const publicDir = path.join(testRoot, '__test_public__');
 const tmpDir    = path.join(process.cwd(), '__tmp_pred');
 
 const files = { img1: 'test_image_1.jpg', img2: 'test_image_2.jpg' };
