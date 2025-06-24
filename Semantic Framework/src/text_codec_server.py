@@ -1,220 +1,203 @@
 #!/usr/bin/env python3
 
-# Imports
-import argparse, traceback, asyncio
+import argparse, traceback, sys, asyncio
 from typing import List
-import sys
-import torch
-import torch.nn as nn
 from fastapi import FastAPI, Body, HTTPException
 from fastapi.responses import JSONResponse
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-from transformers.modeling_outputs import BaseModelOutput
+import torch
+import torch.nn as nn
+import torch.optim as optim
 import uvicorn
-from image_codec_server import GlobalAdditiveAttn 
 
-# Constants
-MODEL_PATH = "facebook/bart-large"
-EMB_SIZE   = 1024
-DEVICE     = "cuda" if torch.cuda.is_available() else "cpu"
+from sonar.inference_pipelines.text import (
+    TextToEmbeddingModelPipeline,
+    EmbeddingToTextModelPipeline,
+)
 
-class T5Autoencoder:
-    def __init__(self, path: str = "facebook/bart-large", device="cpu"):
-        self.device = device
+# ── Configuration ────────────────────────────────────────────────────────────
+ENCODER_NAME = "text_sonar_basic_encoder"
+DECODER_NAME = "text_sonar_basic_decoder"
+LANG         = "eng_Latn"
+DEVICE       = "cuda" if torch.cuda.is_available() else "cpu"
 
-        # tokenizer stays the same
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            path, model_max_length=512
-        )
+# ── Initialize SONAR pipelines & infer embedding dim ─────────────────────────
+print(f"Loading SONAR text encoder (‘{ENCODER_NAME}’) on {DEVICE}…", file=sys.stderr)
+t2vec = TextToEmbeddingModelPipeline(
+    encoder=ENCODER_NAME,
+    tokenizer=ENCODER_NAME,
+    device=torch.device("cuda"),
+    dtype=torch.float16,
+)
 
-        # ⚠️ Use the Seq2SeqLM class, not the CausalLM one
-        self.model = AutoModelForSeq2SeqLM.from_pretrained(path
-        ).to(self.device)
-        self.model.eval()
+print(f"Loading SONAR text decoder (‘{DECODER_NAME}’) on {DEVICE}…", file=sys.stderr)
+v2t = EmbeddingToTextModelPipeline(
+    decoder=DECODER_NAME,
+    tokenizer=ENCODER_NAME,
+    device=torch.device("cuda"),
+    dtype=torch.float16,
+)
 
-        # ── NEW ── set these two so generate() can reference them
-        self.d_model = self.model.config.d_model                  # 512 for t5-small
-        self.decoder_start_token_id = self.model.config.decoder_start_token_id
+# dummy call to get D
+_dummy = t2vec.predict([""], source_lang=LANG)
+if isinstance(_dummy, torch.Tensor):
+    EMB_SIZE = _dummy.size(1)
+else:
+    EMB_SIZE = _dummy.shape[1]
+print(f"Detected embedding size: {EMB_SIZE}", file=sys.stderr)
 
-    # ────────────────────────────────────────────────────────────────────
-    #  Codec API
-    # ────────────────────────────────────────────────────────────────────
-    @torch.no_grad()
-    def embed(self, text: str) -> torch.FloatTensor:
-        """
-        Return a 512-dim float32 latent for a whole document via mean-pool.
-        (Same signature as before.)
-        """
-        # tokenize + encode
-        inp = self.tokenizer(
-            text,
-            return_tensors="pt",
-            max_length=512,
-            truncation=True
-        ).to(self.device)
-        # get encoder hidden states: (1, seq_len, d_model)
-        # enc = self.model.get_encoder()(**inp).last_hidden_state
-        enc = self.model.model.encoder(**inp).last_hidden_state 
-        # mean-pool over tokens → (1, d_model) → (d_model,)
-        return enc.mean(dim=1).squeeze(0)
-    
-    @torch.no_grad()
-    def generate(self,
-                 latent_f32: torch.Tensor,
-                 max_len: int = 512,
-                 temp: float = 1.0
-                ) -> str:
-        """
-        Reconstruct text from a 512-dim latent (float32).
-        (Same signature as before.)
-        """
-        # expand latent to (1,1,d_model)
-        expanded = latent_f32.view(1, 1, self.d_model)
-        enc_out = BaseModelOutput(last_hidden_state=expanded)
+# ──────────────────────────────────────────────────
+#  FastFormer building block
+# ──────────────────────────────────────────────────
+class GlobalAdditiveAttn(nn.Module):
+    def __init__(self, d_model, n_heads):
+        super().__init__()
+        self.d = d_model; self.h = n_heads; head_dim = d_model//n_heads
+        self.q = nn.Linear(d_model,d_model)
+        self.k = nn.Linear(d_model,d_model)
+        self.v = nn.Linear(d_model,d_model)
+        self.fc = nn.Linear(d_model,d_model)
+        self.scale = head_dim ** -0.5
+    def forward(self,x):                # x:(B,N,d)
+        B,N,_=x.shape
+        q=self.q(x).view(B,N,self.h,-1)           # (B,N,h,dh)
+        k=self.k(x).view(B,N,self.h,-1)
+        v=self.v(x).view(B,N,self.h,-1)
+        # global query / key
+        q_g = (q.softmax(dim=1)*q).sum(dim=1,keepdim=True)   # (B,1,h,dh)
+        k_g = (k.softmax(dim=1)*k).sum(dim=1,keepdim=True)
+        # element-wise modulation
+        y = v * (q_g * self.scale) + v * (k_g * self.scale)
+        y = y.view(B,N,self.d)
+        return self.fc(y)
 
-        # start from the decoder_start token
-        decoder_input_ids = torch.tensor(
-            [[self.decoder_start_token_id]],
-            device=self.device
-        )
-
-        out_ids = self.model.generate(
-            encoder_outputs=enc_out,
-            decoder_input_ids=decoder_input_ids,
-            max_length=max_len,
-            temperature=temp,
-            top_p=0.9,
-            do_sample=True,
-            use_cache=True,
-        )
-        return self.tokenizer.decode(out_ids[0], skip_special_tokens=True)
-
-def quantize_to_int8(lat_f32: torch.Tensor) -> List[int]:
-    return (lat_f32.clamp(-1, 1) * 127).round().to(torch.int8).tolist()
-
-def dequantize_from_int8(lat_int8: List[int]) -> torch.FloatTensor:
-    return (torch.tensor(lat_int8, dtype=torch.int8, device=DEVICE) / 127.0)
-
-AE = T5Autoencoder(MODEL_PATH, DEVICE)
-
-HISTORY : list[torch.Tensor] = []
-MODEL   : nn.Module | None = None
-OPT     : torch.optim.Optimizer | None = None
+# ── Latent‐Forecasting Model Setup ────────────────────────────────────────────
+HISTORY: List[torch.Tensor]        = []
+MODEL:       nn.Module | None      = None
+OPT:         optim.Optimizer | None= None
 LOSS = nn.MSELoss()
 LR, EPOCHS = 3e-4, 20
 TRAIN_LOCK = asyncio.Lock()
 
 class LatentFastFormer1D(nn.Module):
-    """Fast-Former over a *sequence* of 1024 scalar tokens."""
+    """Fast-Former over a *sequence* of EMB_SIZE scalar tokens."""
     def __init__(self, d_model: int = 32, n_heads: int = 4):
         super().__init__()
-        self.inp  = nn.Linear(1, d_model)
-        self.pos  = nn.Parameter(torch.randn(1, EMB_SIZE, d_model))
-        self.attn = GlobalAdditiveAttn(d_model, n_heads)
-        self.norm = nn.LayerNorm(d_model)
-        self.mlp  = nn.Sequential(
-            nn.Linear(d_model, 4*d_model), nn.GELU(),
-            nn.Linear(4*d_model, d_model))
-        self.out  = nn.Linear(d_model, 1)
+        self.inp   = nn.Linear(1, d_model)
+        self.pos   = nn.Parameter(torch.randn(1, EMB_SIZE, d_model))
+        self.attn  = GlobalAdditiveAttn(d_model, n_heads)
+        self.norm1 = nn.LayerNorm(d_model)
+        self.mlp   = nn.Sequential(
+            nn.Linear(d_model, 4*d_model),
+            nn.GELU(),
+            nn.Linear(4*d_model, d_model)
+        )
+        self.norm2 = nn.LayerNorm(d_model)
+        self.out   = nn.Linear(d_model, 1)
 
-    def forward(self, x):                 # x:(B,1024)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B, EMB_SIZE)
         h = x.view(x.size(0), EMB_SIZE, 1)
         h = self.inp(h) + self.pos
-        h = self.norm(self.attn(h))
-        h = self.norm(h + self.mlp(h))
+        h = self.norm1(self.attn(h))
+        h = self.norm2(h + self.mlp(h))
         return self.out(h).view(x.size(0), EMB_SIZE)
 
 async def _maybe_train():
-    """
-    Background task that (re)trains the Fast-Former whenever we have
-    at least one (x → y) pair in HISTORY.
-    """
+    """Background training on HISTORY → builds/updates MODEL."""
     global MODEL, OPT
-    if len(HISTORY) < 2:            # need just one successive pair
+    if len(HISTORY) < 2:
         return
-
-    xs, ys = zip(*[(HISTORY[i], HISTORY[i + 1])
-                   for i in range(len(HISTORY) - 1)])
-    x = torch.stack(xs)
-    y = torch.stack(ys)
-
+    # prepare pairs (H[t] -> H[t+1])
+    xs = torch.stack(HISTORY[:-1])  # (N-1, EMB_SIZE)
+    ys = torch.stack(HISTORY[1:])
     if MODEL is None:
         MODEL = LatentFastFormer1D().to(DEVICE)
-        OPT   = torch.optim.AdamW(MODEL.parameters(), lr=LR)
-
+        OPT   = optim.AdamW(MODEL.parameters(), lr=LR)
     async with TRAIN_LOCK:
         MODEL.train()
         for _ in range(EPOCHS):
             OPT.zero_grad()
-            LOSS(MODEL(x), y).backward()
+            LOSS(MODEL(xs.to(DEVICE)), ys.to(DEVICE)).backward()
             OPT.step()
         MODEL.eval()
 
-def _forecast(vec_int8: list[int], want_text: bool = False):
-    """
-    Predict the next latent (and optionally decode it), ensuring that
-    the model is trained at least once before use.
-    """
-    # If a scheduled background train hasn’t finished yet, do a
-    # quick synchronous pass so the first /predict never fails.
-    if (MODEL is None) and len(HISTORY) >= 2:
-        import asyncio
-        asyncio.run(_maybe_train())
-
-    if MODEL is None:
-        raise HTTPException(400, "Need ≥ 2 decode calls first")
-
-    x = dequantize_from_int8(vec_int8).unsqueeze(0).to(DEVICE)
-    with torch.no_grad():
-        nxt_f32 = MODEL(x).squeeze(0)
-
-    nxt_int8 = quantize_to_int8(nxt_f32)
-    txt = AE.generate(nxt_f32) if want_text else None
-    return nxt_int8, txt
-
-app = FastAPI(title="Contra-BT5-small codec (int8 latent)",
-              docs_url=None, redoc_url=None)
+# ── FastAPI app ─────────────────────────────────────────────────────────────
+app = FastAPI(title="SONAR Text Codec (with latent forecasting)", docs_url=None, redoc_url=None)
 
 @app.post("/encode")
 async def encode(texts: List[str] = Body(..., embed=True)):
     try:
-        out = [quantize_to_int8(AE.embed(t).cpu()) for t in texts]
+        emb = t2vec.predict(texts, source_lang=LANG)
+        if isinstance(emb, torch.Tensor):
+            out = emb.cpu().tolist()
+        else:
+            import numpy as np
+            out = emb.astype(np.float32).tolist()
         return JSONResponse(out)
     except Exception as e:
-        traceback.print_exc(); raise HTTPException(500, f"Encode error: {e}")
+        traceback.print_exc()
+        raise HTTPException(500, f"Encode error: {e}")
 
 @app.post("/decode")
-async def decode(embeddings: List[List[int]] = Body(..., embed=True)):
+async def decode(embeddings: List[List[float]] = Body(..., embed=True)):
     try:
-        outs = []
-        for vec in embeddings:
-            if len(vec) != EMB_SIZE:
-                raise HTTPException(400, f"Each embedding must be {EMB_SIZE} numbers")
-            lat_f32 = dequantize_from_int8(vec)
-            HISTORY.append(lat_f32)              
-            outs.append(AE.generate(lat_f32))
-        asyncio.create_task(_maybe_train())     
-        return JSONResponse(outs)
+        tensor = torch.tensor(embeddings, dtype=torch.float32, device=DEVICE)
+        if tensor.ndim != 2 or tensor.size(1) != EMB_SIZE:
+            raise HTTPException(400, f"Each embedding must be length {EMB_SIZE}")
+        texts = v2t.predict(tensor, target_lang=LANG, max_seq_len=512)
+
+        # ➡️ record for forecasting
+        for vec in tensor:
+            HISTORY.append(vec.detach().cpu())
+        # ➡️ train in background
+        asyncio.create_task(_maybe_train())
+
+        return JSONResponse(texts)
     except HTTPException:
         raise
     except Exception as e:
-        traceback.print_exc(); raise HTTPException(500, f"Decode error: {e}")
+        traceback.print_exc()
+        raise HTTPException(500, f"Decode error: {e}")
 
 @app.post("/predict")
-async def predict_ep(vec: List[int] = Body(..., embed=True), text: bool = False):
+async def predict(vec: List[float] = Body(..., embed=True), text: bool = False):
+    """
+    Forecast the *next* embedding given `vec`. 
+    If ?text=true, also decode that forecast to text.
+    """
     try:
-        nxt, sent = _forecast(vec, text)
-        return (JSONResponse({"latent": nxt, "text": sent})
-                if text else JSONResponse(nxt))
+        tensor = torch.tensor([vec], dtype=torch.float32, device=DEVICE)  # (1, EMB_SIZE)
+        if tensor.size(1) != EMB_SIZE:
+            raise HTTPException(400, f"Embedding must be length {EMB_SIZE}")
+
+        # ensure at least one train pass
+        if (MODEL is None) and len(HISTORY) >= 2:
+            import asyncio as _asyncio
+            _asyncio.run(_maybe_train())
+
+        if MODEL is None:
+            raise HTTPException(400, "Need ≥ 2 decode calls first to build prediction model")
+
+        with torch.no_grad():
+            nxt = MODEL(tensor).squeeze(0).cpu()
+
+        latent = nxt.tolist()
+        if text:
+            txt = v2t.predict(nxt.unsqueeze(0), target_lang=LANG, max_seq_len=512)[0]
+            return JSONResponse({"latent": latent, "text": txt})
+        else:
+            return JSONResponse(latent)
     except HTTPException:
         raise
     except Exception as e:
-        traceback.print_exc(); raise HTTPException(500, f"Predict error: {e}")
+        traceback.print_exc()
+        raise HTTPException(500, f"Predict error: {e}")
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--host", default="0.0.0.0")
-    ap.add_argument("--port", type=int, default=8080)
-    args = ap.parse_args()
-    print(f"Text Codec Ready on {DEVICE} – API: http://{args.host}:{args.port}", file=sys.stderr, flush=True)
+    p = argparse.ArgumentParser()
+    p.add_argument("--host", default="0.0.0.0")
+    p.add_argument("--port", type=int, default=8080)
+    args = p.parse_args()
+    print(f"SONAR Text Codec Ready on {DEVICE} – http://{args.host}:{args.port}",
+          file=sys.stderr, flush=True)
     uvicorn.run(app, host=args.host, port=args.port, workers=1, log_level="warning")

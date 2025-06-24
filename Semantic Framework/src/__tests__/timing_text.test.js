@@ -99,11 +99,7 @@ describe('SemanticFramework Image & KB Performance', () => {
         --------------------------------------------------------- */
         const origSize = fs.statSync(tmpTextPath1).size;
 
-        function byteSizeOfLatent(v) {
-            const flat = Array.isArray(v[0]) ? v.flat() : v;   // matrix → 1-D
-            return flat.length * 4;                            // Float32 → 4 B
-        }
-        const latentSize = byteSizeOfLatent(vec);
+        const latentSize = Buffer.byteLength(JSON.stringify(vec), 'utf8');
 
         const reconSize = fs.statSync(reconPath).size;
 

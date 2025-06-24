@@ -15,7 +15,7 @@ const SemanticFramework = require('../SemanticFramework').default;
 
 /* ─── config ─── */
 jest.setTimeout(600_000);
-const ITERATIONS = 2;
+const ITERATIONS = 4;
 
 /* ─── paths ─── */
 const testRoot  = __dirname;
