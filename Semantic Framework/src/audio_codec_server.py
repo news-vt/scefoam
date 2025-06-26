@@ -29,6 +29,14 @@ from fastapi.responses import JSONResponse, Response
 import uvicorn
 from audiocraft.models.encodec import CompressionModel
 
+from contextlib import nullcontext
+DTYPE   = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+if torch.cuda.is_available():
+    from torch.amp import autocast          # future-proof import
+    autocast = autocast(device_type="cuda", dtype=DTYPE)
+else:
+    autocast = nullcontext()
+
 # ─── constants & device ─────────────────────────────────────────────────
 DEVICE       = "cuda" if torch.cuda.is_available() else "cpu"
 TARGET_SR    = 24_000
@@ -42,6 +50,7 @@ EPOCHS       = 50
 MAX_TOKENS   = 2048     # max total tokens per window = n_q * T_window
 HISTORY_K    = 6   
 acc_threshold = 99
+torch.set_float32_matmul_precision("medium")
 
 # ─── load EnCodec & compute frames-per-SEC_LIMIT ────────────────────────
 codec = CompressionModel.get_pretrained(CODEC_ID, device=DEVICE).eval()
@@ -104,7 +113,7 @@ def _wav_to_latent(wav_raw_bytes: bytes) -> List[float]:
         wav = wav.mean(0, keepdim=True)
     if sr != TARGET_SR:
         wav = torchaudio.transforms.Resample(sr, TARGET_SR)(wav)
-    with torch.no_grad():
+    with torch.no_grad(), autocast:
         codes, _ = codec.encode(wav.unsqueeze(0).to(DEVICE))
     _, n_q, T = codes.shape
     return [TARGET_SR, n_q, T] + codes.cpu().view(-1).tolist()
@@ -113,9 +122,9 @@ def _latent_to_wav(vec: list) -> torch.Tensor:
     sr, n_q, T = map(int, vec[:3])
     body = vec[3:]
     codes = torch.tensor(body, dtype=torch.int64, device=DEVICE).view(1, n_q, T)
-    with torch.no_grad():
+    with torch.no_grad(), autocast:
         wav = codec.decode(codes).squeeze(0)
-    return wav
+    return wav.float()
 
 # ─── synchronous, random-window training ───────────────────────────────
 async def _maybe_train():
@@ -230,7 +239,7 @@ async def predict_ep(vec: list = Body(..., embed=True), wav: bool = False):
     out_vec = [TARGET_SR, n_q, T_LEN] + flat_pred
 
     if wav:
-        wav_out = codec.decode(full_pred.to(DEVICE)).squeeze(0)
+        wav_out = codec.decode(full_pred.to(DEVICE)).squeeze(0).float()
         buf = BytesIO()
         sf.write(buf, wav_out.cpu().numpy().reshape(-1,1),
                  TARGET_SR, format="WAV", subtype="PCM_16")

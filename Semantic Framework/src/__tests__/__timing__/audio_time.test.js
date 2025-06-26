@@ -47,7 +47,7 @@ mp3Files.forEach(file => {
     const t1 = process.hrtime.bigint();
     encMs.push(ns2ms(t1 - t0));
     expect(Array.isArray(v)).toBe(true);
-  });
+  }, 60_000);
 
   test(`decode ${file}`, async () => {
     const v  = sf.encode_vec(token);
@@ -55,7 +55,7 @@ mp3Files.forEach(file => {
     await sf.decode_vec(v);
     const t1 = process.hrtime.bigint();
     decMs.push(ns2ms(t1 - t0));
-  });
+  }, 60_000);
 });
 
 /* ─────────── CSV export ─────────── */

@@ -20,6 +20,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from diffusers import AutoencoderKL
+from contextlib import nullcontext    
+
+DTYPE = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+autocast = (
+    torch.autocast("cuda", dtype=DTYPE)          # mixed precision on GPU
+    if torch.cuda.is_available() else nullcontext()
+)
 
 DEVICE    = "cuda" if torch.cuda.is_available() else "cpu"
 LATENT_CH = 4
@@ -45,8 +52,9 @@ def _encode(img_bytes: bytes, ds:int):
     img=Image.open(BytesIO(img_bytes)).convert("RGB")
     w,h=img.size
     with torch.no_grad():
-        lat64=scripted_encode(_pre(img))
-        lat_ds=F.interpolate(lat64,size=(ds,ds),mode="bilinear",align_corners=False)
+        with autocast:
+            lat64=scripted_encode(_pre(img))
+            lat_ds=F.interpolate(lat64,size=(ds,ds),mode="bilinear",align_corners=False)
     return [w,h]+lat_ds.cpu().view(-1).tolist()
 
 def _decode(vec):
@@ -57,11 +65,25 @@ def _decode(vec):
     lat=torch.tensor(latent,dtype=torch.float32,device=DEVICE)\
         .view(1,LATENT_CH,ds,ds)
     with torch.no_grad():
-        lat64=F.interpolate(lat,size=(64,64),mode="bilinear",align_corners=False)
-        img_t=scripted_decode(lat64)
+        with autocast:
+            lat64=F.interpolate(lat,size=(64,64),mode="bilinear",align_corners=False)
+            img_t=scripted_decode(lat64)
     arr=((img_t.cpu()[0].permute(1,2,0)+1)*127.5).clamp(0,255).byte().numpy()
-    img=Image.fromarray(arr)
-    if w and h: img=img.resize((w,h),Image.LANCZOS)
+    
+    # img=Image.fromarray(arr)
+    # if w and h: img=img.resize((w,h),Image.LANCZOS)
+
+    img = Image.fromarray(arr)
+    if w and h:
+        img_t = F.interpolate(
+            torch.from_numpy(arr).permute(2, 0, 1).unsqueeze(0).float(),  # to CHW
+            size=(h, w),
+            mode="bilinear",
+            align_corners=False,
+            antialias=True,
+        )
+        img = Image.fromarray(img_t.byte().squeeze(0).permute(1, 2, 0).cpu().numpy())
+        
     buf=BytesIO(); img.save(buf,"JPEG",quality=85)
     return buf.getvalue()
 

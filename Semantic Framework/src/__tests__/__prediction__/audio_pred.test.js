@@ -14,7 +14,7 @@ const rootDir   = path.resolve(__dirname, '..');
 const dataDir   = path.join(rootDir, '__test_data__', 'audio');
 const resultDir = path.join(rootDir, '__result__');
 const publicDir = path.join(rootDir, '__test_public__');
-const tmpDir    = path.join(process.cwd(), '__tmp_pred');
+const tmpDir    = path.join(process.cwd(), '__tmp');
 const csvPath   = path.join(resultDir, 'audio_prediction.csv');
 
 /* ───────── discover “*_1.mp3” & “*_2.mp3” ───────── */

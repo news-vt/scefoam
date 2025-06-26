@@ -8,30 +8,36 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import uvicorn
+from contextlib import nullcontext    
+
+DTYPE = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+autocast = (
+    torch.autocast("cuda", dtype=DTYPE)          # mixed precision on GPU
+    if torch.cuda.is_available() else nullcontext()
+)
 
 from sonar.inference_pipelines.text import (
     TextToEmbeddingModelPipeline,
     EmbeddingToTextModelPipeline,
 )
 
-# ── Configuration ────────────────────────────────────────────────────────────
 ENCODER_NAME = "text_sonar_basic_encoder"
 DECODER_NAME = "text_sonar_basic_decoder"
 LANG         = "eng_Latn"
-# DEVICE       = "cuda" if torch.cuda.is_available() else "cpu"
-DEVICE       = "cpu"
+DEVICE       = "cuda" if torch.cuda.is_available() else "cpu"
 
-# ── Initialize SONAR pipelines & infer embedding dim ─────────────────────────
 # print(f"Loading SONAR text encoder (‘{ENCODER_NAME}’) on {DEVICE}…", file=sys.stderr)
 t2vec = TextToEmbeddingModelPipeline(
     encoder=ENCODER_NAME,
     tokenizer=ENCODER_NAME,
+    device=torch.device(DEVICE),
 )
 
 # print(f"Loading SONAR text decoder (‘{DECODER_NAME}’) on {DEVICE}…", file=sys.stderr)
 v2t = EmbeddingToTextModelPipeline(
     decoder=DECODER_NAME,
     tokenizer=ENCODER_NAME,
+    device=torch.device(DEVICE),
 )
 
 # Getting dimension size D
@@ -136,13 +142,14 @@ app = FastAPI(title="SONAR Text Codec (with latent forecasting)", docs_url=None,
 @app.post("/encode")
 async def encode(texts: List[str] = Body(..., embed=True)):
     try:
-        emb = t2vec.predict(texts, source_lang=LANG)
-        if isinstance(emb, torch.Tensor):
-            out = emb.cpu().tolist()
-        else:
-            import numpy as np
-            out = emb.astype(np.float32).tolist()
-        return JSONResponse(out)
+        with autocast:
+            emb = t2vec.predict(texts, source_lang=LANG)
+            if isinstance(emb, torch.Tensor):
+                out = emb.cpu().tolist()
+            else:
+                import numpy as np
+                out = emb.astype(np.float32).tolist()
+            return JSONResponse(out)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(500, f"Encode error: {e}")
@@ -150,18 +157,19 @@ async def encode(texts: List[str] = Body(..., embed=True)):
 @app.post("/decode")
 async def decode(embeddings: List[List[float]] = Body(..., embed=True)):
     try:
-        tensor = torch.tensor(embeddings, dtype=torch.float32, device=DEVICE)
-        if tensor.ndim != 2 or tensor.size(1) != EMB_SIZE:
-            raise HTTPException(400, f"Each embedding must be length {EMB_SIZE}")
-        texts = v2t.predict(tensor, target_lang=LANG, max_seq_len=512)
+        with autocast:
+            tensor = torch.tensor(embeddings, dtype=torch.float32, device=DEVICE)
+            if tensor.ndim != 2 or tensor.size(1) != EMB_SIZE:
+                raise HTTPException(400, f"Each embedding must be length {EMB_SIZE}")
+            texts = v2t.predict(tensor, target_lang=LANG, max_seq_len=512)
 
-        # ➡️ record for forecasting
-        for vec in tensor:
-            HISTORY.append(vec.detach().cpu())
-        # ➡️ train in background
-        asyncio.create_task(_maybe_train())
+            # ➡️ record for forecasting
+            for vec in tensor:
+                HISTORY.append(vec.detach().cpu())
+            # ➡️ train in background
+            asyncio.create_task(_maybe_train())
 
-        return JSONResponse(texts)
+            return JSONResponse(texts)
     except HTTPException:
         raise
     except Exception as e:

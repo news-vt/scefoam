@@ -33,7 +33,7 @@ trap '
 
 # 4) Server list (now including text)
 declare -A SERVERS=(
-  [text]=src/text_codec_server.py    # run with uv run
+  # [text]=src/text_codec_server.py    # run with uv run
   [audio]=src/audio_codec_server.py  # plain python
   [image]=src/image_codec_server.py  # plain python
 )

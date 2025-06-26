@@ -49,3 +49,51 @@ uv sync --extra cpu --extra eval --extra data
 # For GPU support (example: Torch 2.5.1 + CUDA 12.1)
 uv pip install torch==2.5.1 --extra-index-url https://download.pytorch.org/whl/cu121 --upgrade
 uv pip install fairseq2==v0.3.0rc1 --pre --extra-index-url https://fair.pkg.atmeta.com/fairseq2/whl/rc/pt2.5.1/cu121 --upgrade
+
+
+
+
+
+
+
+
+
+
+
+# 0) fresh virtual-env + bootstrap tooling
+python3 -m venv .venv
+source .venv/bin/activate                     # ← every shell session!
+python   -m ensurepip --upgrade               # pip gets installed
+python   -m pip install --upgrade pip uv      # uv lives in the venv
+
+# 1) install the project with its *default* (CPU) extras
+uv sync                                        # reads pyproject.toml
+
+# 2) switch the DL stack to CUDA *11.8*  (choose cu124 if that’s your wheelhouse)
+# 2-a) replace torch + torchaudio with the CUDA build
+uv pip install --upgrade --force-reinstall \
+  --extra-index-url https://download.pytorch.org/whl/cu118 \
+  torch==2.5.1+cu118 torchaudio==2.5.1+cu118
+
+# 2-b) remove the CPU fairseq2n that came from uv sync …
+uv pip uninstall fairseq2n                 # uv asks for confirmation, -y = yes
+
+# 2-c) …and install the matching CUDA build
+uv pip install --pre \
+  --extra-index-url https://fair.pkg.atmeta.com/fairseq2/whl/rc/pt2.5.1/cu118 \
+  fairseq2n==0.3.0rc1                         # note the **+cu118** tag inside the wheel
+
+# 3) sanity-check the result
+python - <<'PY'
+import torch, import importlib.metadata as im
+print("torch     :", torch.__version__, torch.version.cuda)
+print("fairseq2n :", im.version("fairseq2n"))
+print("CUDA OK?  :", torch.cuda.is_available())
+PY
+# should print something like:
+# torch     : 2.5.1+cu118 11.8
+# fairseq2n : 0.3.0rc1+cu118
+# CUDA OK?  : True
+
+# 4) run the server
+python src/text_codec_server.py               # now starts on “cuda”

@@ -43,7 +43,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest-asyncio>=0.15.0", "pytest-cov>=2.6.1", "pytest>=4.3.0", "coverage[toml]>=5.1"]
+dev = ["uv", "pytest-asyncio>=0.15.0", "pytest-cov>=2.6.1", "pytest>=4.3.0", "coverage[toml]>=5.1"]
 
 [project.optional-dependencies]
 cpu = [
@@ -72,7 +72,7 @@ Tracker = "https://github.com/news-vt/semantic-video-communication/issues"
 [project.entry-points."fairseq2"]
 "fairseq2" = "sonar:setup_fairseq2"
 
-[tool.flit.module]      # <-- NEW-STYLE place for the import name
+[tool.flit.module] 
 name = "sonar"
 
 [tool.ruff]
