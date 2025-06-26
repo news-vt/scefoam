@@ -14,11 +14,22 @@ export default class AudioCodec {
     this.timeout = timeout;
   }
 
-  embed(absPath) {                    
-    const { status, stdout, stderr } = spawnSync("curl", ["-fsS", "-X", "POST", "-H", "Content-Type: application/octet-stream", "--data-binary", `@${absPath}`, `${this.base}/encode`], { encoding: "utf8", maxBuffer: 200e6 });
-    if (status !== 0) throw new Error(stderr.trim() || "curl failed");
+  embed(absPath) {
+    const { status, stdout, stderr } = spawnSync(
+      "curl",
+      [
+        "-fsS", "-X", "POST",
+        "-F", `file=@${absPath}`,
+        `${this.base}/encode`
+      ],
+      { encoding: "utf8", maxBuffer: 200e6 }
+    );
+    if (status !== 0)
+      throw new Error(stderr.trim() || "curl failed");
+
+    /* ⬇️  this line was missing */
     return JSON.parse(stdout.trim());
-  }
+}
 
   async decode(vec) {
     const res = await request(`${this.base}/decode`, { method: "POST", body: JSON.stringify(vec), headers: { "Content-Type": "application/json" }, timeout: this.timeout });
@@ -37,6 +48,6 @@ export default class AudioCodec {
       const wavBuf = Buffer.from(parsed.wav.split(",")[1], "hex");
       return { latent: parsed.latent, wav: wavBuf };
     }
-    return parsed; 
+    return parsed;
   }
 }

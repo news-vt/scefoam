@@ -126,7 +126,9 @@ class LatentFastFormer(nn.Module):
 
 HISTORY=[]
 MODEL=None; OPT=None; LOSS=nn.MSELoss()
-LR=3e-4; EPOCHS=10; TRAIN_LOCK=asyncio.Lock()
+LR=3e-4; EPOCHS=600; TRAIN_LOCK=asyncio.Lock()
+ACC_THR     = 99.9 
+TOLERANCE = 0.05
 
 def _split(vec):
     w,h,*body = vec if len(vec)>2 else (0,0,*vec)
@@ -135,20 +137,49 @@ def _split(vec):
 
 async def _maybe_train():
     global MODEL, OPT
-    if len(HISTORY)<2: return
-    xs,ys = zip(*[(HISTORY[i][1],HISTORY[i+1][1]) for i in range(len(HISTORY)-1)])
-    x=torch.stack(xs); y=torch.stack(ys)
-    ds=int(math.sqrt(x.shape[1]/LATENT_CH))
-    if MODEL is None or MODEL.ds!=ds:
-        MODEL=LatentFastFormer(ds).to(DEVICE)
-        OPT=torch.optim.AdamW(MODEL.parameters(),lr=LR)
+    if len(HISTORY) < 2:
+        return
+
+    # HISTORY holds entries like (shape, latent_tensor)
+    # we only want the latents:
+    # latents = [entry[1] for entry in HISTORY]
+    latents = [latent for (_shape, latent) in HISTORY]
+
+    # build x and y sequences: x = [H[0],…,H[N-2]], y = [H[1],…,H[N-1]]
+    x = torch.stack(latents[:-1], dim=0).to(DEVICE)   # shape (N-1, D)
+    y = torch.stack(latents[1:],  dim=0).to(DEVICE)   # shape (N-1, D)
+
+    # infer spatial dims from D
+    ds = int(math.sqrt(x.size(1) / LATENT_CH))
+
+    # re-init MODEL if needed
+    if MODEL is None or MODEL.ds != ds:
+        MODEL = LatentFastFormer(ds).to(DEVICE)
+        OPT   = torch.optim.AdamW(MODEL.parameters(), lr=LR)
+
     async with TRAIN_LOCK:
         MODEL.train()
         for _ in range(EPOCHS):
+            await asyncio.sleep(0)
+            
             OPT.zero_grad()
-            pred=MODEL(x)
-            loss=LOSS(pred,y)
-            loss.backward(); OPT.step()
+
+            # forward + loss
+            preds = MODEL(x)            # now preds is Tensor (N-1, D)
+            loss  = LOSS(preds, y)      # scalar
+
+            loss.backward()
+            OPT.step()
+
+            # compute “accuracy” as fraction within tolerance
+            with torch.no_grad():
+                correct = (preds - y).abs() < TOLERANCE
+                acc = correct.float().mean().item() * 100.0
+
+            if acc >= ACC_THR:
+                break
+
+        # print(f"[Train-loop] loss={loss.item():.4f} – acc={acc:.1f}%", flush=True)
         MODEL.eval()
 
 def _forecast(vec, want_jpeg=False):

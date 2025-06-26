@@ -41,7 +41,7 @@ LR           = 2e-4
 EPOCHS       = 50
 MAX_TOKENS   = 2048     # max total tokens per window = n_q * T_window
 HISTORY_K    = 6   
-acc_threshold = 95
+acc_threshold = 99
 
 # ─── load EnCodec & compute frames-per-SEC_LIMIT ────────────────────────
 codec = CompressionModel.get_pretrained(CODEC_ID, device=DEVICE).eval()
@@ -162,10 +162,9 @@ async def _maybe_train():
                 with torch.no_grad():
                     preds = flat_logits.argmax(-1)
                     acc = (preds == flat_target).float().mean().item() * 100
-                # print(f"[Train-loop] epoch {epoch+1}/{EPOCHS} – loss={loss:.4f} – acc={acc:.1f}%", flush=True)
                 if acc>acc_threshold:
                     break
-
+            # print(f"[Train-loop] epoch - loss={loss:.4f} – acc={acc:.1f}%", flush=True)
             MODEL.eval()
 
         loop = asyncio.get_running_loop()

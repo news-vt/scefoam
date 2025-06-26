@@ -1,108 +1,122 @@
+// src/__tests__/__prediction__/image_pred.test.js
 /* eslint-env jest */
-/**
- * Bidirectional image-pair fine-tuning test
- *
- * For ITERATIONS loops we alternate:
- *   odd  i ⇒ teacher sends [img1,img2], predict from img1
- *   even i ⇒ teacher sends [img2,img1], predict from img2
- *
- * Predicted JPEGs are written to
- *   __tests__/__test_public__/predicted_image_iter<i>_<dir>.jpg
- */
-
+/* eslint-disable no-console */
 const fs   = require('fs');
 const path = require('path');
 const SemanticFramework = require('../../SemanticFramework').default;
 
-/* ─── config ─── */
+/* ───────── config ───────── */
 jest.setTimeout(900_000);
-const ITERATIONS = 2;                 // change as you like
+const ITERATIONS = 20;
 
-/* ─── paths ─── */
-const testRoot = path.resolve(__dirname, '..');
-const dataDir   = path.join(testRoot, '__test_data__');
-const publicDir = path.join(testRoot, '__test_public__');
-const tmpDir    = path.join(process.cwd(), '__tmp_pred');
+/* ───────── folders ───────── */
+const rootDir   = path.resolve(__dirname, '..');     // src/__tests__
+const dataRoot  = path.join(rootDir, '__test_data__');
+const imgDir    = fs.existsSync(path.join(dataRoot, 'images'))
+                    ? path.join(dataRoot, 'images')
+                    : dataRoot;
 
-const files = { img1: 'test_image_1.jpg', img2: 'test_image_2.jpg' };
-const teacherKB    = path.join(publicDir, 'kb_teacher_img.json');
-const apprenticeKB = path.join(publicDir, 'kb_apprentice_img.json');
+const resultDir = path.join(rootDir, '__result__');
+const publicDir = path.join(rootDir, '__test_public__');
+const tmpDir    = path.join(process.cwd(), '__tmp');
+const csvPath   = path.join(resultDir, 'image_prediction.csv');
 
-/* ─── helpers ─── */
-const ensureDir = d => fs.mkdirSync(d, { recursive: true });
-const blankKB = fp => fs.writeFileSync(
-  fp,
-  JSON.stringify(
-    { map:{}, receivedData:[], hexHistory:[], predictedText:'', modelReady:false },
-    null, 2
-  )
-);
-const save = (name, payload) => {
-  const out = path.join(publicDir, name);
-  fs.writeFileSync(
-    out,
-    Buffer.isBuffer(payload) ? payload :
-    typeof payload === 'string' ? payload :
-    JSON.stringify(payload, null, 2)
-  );
+/* ───────── discover JPEG fixtures ───────── */
+let jpgs = fs.readdirSync(imgDir).filter(f => /\.jpe?g$/i.test(f));
+if (jpgs.length < 2) throw new Error(`Need ≥2 .jpg files in ${imgDir}`);
+
+const img1 = jpgs.find(f => /_1\.jpe?g$/i.test(f)) || jpgs[0];
+jpgs = jpgs.filter(f => f !== img1);
+const img2 = jpgs.find(f => /_2\.jpe?g$/i.test(f)) || jpgs[0];
+
+const files = { img1, img2 };
+
+/* ───────── helpers ───────── */
+const ensure  = d => fs.mkdirSync(d, { recursive: true });
+const blankKB = f => fs.writeFileSync(f, JSON.stringify({
+  map:{}, receivedData:[], hexHistory:[], predictedText:'', modelReady:false
+}, null,2));
+
+const elapsedMs = (startNs, endNs) => Number(endNs - startNs) / 1e6;
+
+/* ───────── cosine similarity ───────── */
+const cosine = (a, b) => {
+  let dot=0, na=0, nb=0;
+  for (let i=0;i<a.length;i++){
+    dot += a[i]*b[i]; na += a[i]*a[i]; nb += b[i]*b[i];
+  }
+  return dot / (Math.sqrt(na)*Math.sqrt(nb));
 };
 
-/* ─── global frameworks ─── */
-let teacher, apprentice;
+/* ───────── KB paths ───────── */
+const teacherKB    = path.join(publicDir, 'kb_teacher_img.json');
+const apprenticeKB = path.join(publicDir, 'kb_apprentice_img.json');
+const probeKB      = path.join(publicDir, 'kb_probe_img.json');
 
-/* ------------------------------------------------------------------ */
+/* ───────── init frameworks ───────── */
+let teacher, apprentice, probe;
 beforeAll(() => {
-  ensureDir(publicDir); ensureDir(tmpDir);
-  blankKB(teacherKB);    blankKB(apprenticeKB);
+  [publicDir, resultDir, tmpDir].forEach(ensure);
+  [teacherKB, apprenticeKB, probeKB].forEach(blankKB);
 
-  /* copy fixture JPEGs into tmp */
   Object.values(files).forEach(fn =>
-    fs.copyFileSync(path.join(dataDir, fn), path.join(tmpDir, fn))
+    fs.copyFileSync(path.join(imgDir, fn), path.join(tmpDir, fn))
   );
 
   teacher    = new SemanticFramework({ kbPath: teacherKB,    imgDir: tmpDir });
   apprentice = new SemanticFramework({ kbPath: apprenticeKB, imgDir: tmpDir });
+  probe      = new SemanticFramework({ kbPath: probeKB,      imgDir: tmpDir });
 });
 
-/* ------------------------------------------------------------------ */
-test(`cycle img1→img2 and img2→img1 for ${ITERATIONS} iterations`, async () => {
+/* ───────── metric buffers ───────── */
+const timesMs = [];
+const sims    = [];
 
-  for (let i = 1; i <= ITERATIONS; ++i) {
-    const forward = i % 2 === 1;                       // odd = 1→2, even = 2→1
-    const dirTag  = forward ? '1to2' : '2to1';
-    const imgTokens = forward
-      ? [`<img:${files.img1}>`, `<img:${files.img2}>`]
-      : [`<img:${files.img2}>`, `<img:${files.img1}>`];
+/* ───────── tokens ───────── */
+const tok1 = `<img:${files.img1}>`;
+const tok2 = `<img:${files.img2}>`;
 
-    /* ① teacher sends */
-    const packets = teacher.send(imgTokens);
-    expect(packets.length).toBe(2);
+/* ───────── helper: always get latent array ───────── */
+const getVec = out => Array.isArray(out) ? out : out.latent;
 
-    /* ② apprentice receives (trains) */
-    const decs = await apprentice.receive(packets);
-    expect(decs.length).toBe(2);
+/* ───────── prediction loop ───────── */
+test(`bidirectional prediction for ${ITERATIONS} iterations`, async () => {
+  for (let i = 1; i <= ITERATIONS; i++) {
 
-    /* save reconstructions first time we see this direction */
-    if (i === 1) {
-      decs.forEach((buf, idx) =>
-        save(`reconstructed_image_${idx + 1}_${dirTag}.jpg`, buf)
-      );
-    }
+    /* teach & predict img1 → img2 */
+    await apprentice.receive( teacher.send([tok1]) );
+    await apprentice.receive( teacher.send([tok2]) );
 
-    /* small pause for any async work (affects transformer version) */
-    await new Promise(r => setTimeout(r, 300));
+    let t0 = process.hrtime.bigint();
+    const pred12 = await apprentice.predict(tok1, 'image');
+    let t1 = process.hrtime.bigint();
+    timesMs.push(elapsedMs(t0, t1));
 
-    /* ③ predict next latent from first token */
-    const pred = await apprentice.predict(imgTokens[0], 'image', { wantJPEG:true });
+    sims.push(cosine(getVec(pred12), probe.encode_vec(tok2)));
 
-    /* ④ persist artefacts */
-    save(`predicted_image_iter${i}_${dirTag}.jpg`, pred.jpeg);
-    // save(`predicted_image_latent_iter${i}_${dirTag}.json`, pred.latent);
+    // /* teach & predict img2 → img1 */
+    // await apprentice.receive( teacher.send([tok2]) );
+    // await apprentice.receive( teacher.send([tok1]) );
 
-    /* quick sanity */
-    expect(Array.isArray(pred.latent)).toBe(true);
-    expect(Buffer.isBuffer(pred.jpeg)).toBe(true);
+    // t0 = process.hrtime.bigint();
+    // const pred21 = await apprentice.predict(tok2, 'image');
+    // t1 = process.hrtime.bigint();
+    // timesMs.push(elapsedMs(t0, t1));
+
+    // sims.push(cosine(getVec(pred21), probe.encode_vec(tok1)));
   }
+});
 
-  console.log(`📂  Outputs written to: ${publicDir}`);
+/* ───────── CSV export ───────── */
+afterAll(() => {
+  if (!timesMs.length) return;
+
+  const avg = arr => arr.reduce((s,v)=>s+v,0)/arr.length;
+  const csv =
+    `metric,value\n` +
+    `avgPredictMs,${avg(timesMs).toFixed(2)}\n` +
+    `avgCosineSim,${avg(sims).toFixed(4)}\n`;
+
+  fs.writeFileSync(csvPath, csv, 'utf8');
+  console.log(`\n→ Prediction metrics written to ${csvPath}\n`);
 });

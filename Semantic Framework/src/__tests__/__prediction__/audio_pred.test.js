@@ -1,122 +1,107 @@
+// src/__tests__/audio_pred.test.js
 /* eslint-env jest */
-/**
- * Bidirectional audio-pair fine-tuning test
- *
- * odd  i ⇒ teacher sends  [audio1 , audio2]  (twice)    → predict from audio1
- * even i ⇒ teacher sends  [audio2 , audio1]  (twice)    → predict from audio2
- *
- * Saving every predicted WAV lets you listen for convergence.
- */
-
-const fs = require('fs');
+/* eslint-disable no-console */
+const fs   = require('fs');
 const path = require('path');
 const SemanticFramework = require('../../SemanticFramework').default;
 
-/* ─── config ─── */
+/* ───────── config ───────── */
 jest.setTimeout(900_000);
-const ITERATIONS = 20;  // change as you like, but 5 is a good start
+const ITERATIONS = 20;
 
-/* ─── paths ─── */
-const testRoot = path.resolve(__dirname, '..');
-const dataDir = path.join(testRoot, '__test_data__');
-const publicDir = path.join(testRoot, '__test_public__');
-const tmpDir = path.join(process.cwd(), '__tmp_pred');
+/* ───────── folders ───────── */
+const rootDir   = path.resolve(__dirname, '..');
+const dataDir   = path.join(rootDir, '__test_data__', 'audio');
+const resultDir = path.join(rootDir, '__result__');
+const publicDir = path.join(rootDir, '__test_public__');
+const tmpDir    = path.join(process.cwd(), '__tmp_pred');
+const csvPath   = path.join(resultDir, 'audio_prediction.csv');
 
-const files = { audio1: 'test_audio_1.mp3', audio2: 'test_audio_2.mp3' };
-const teacherKB = path.join(publicDir, 'kb_teacher_audio.json');
-const apprenticeKB = path.join(publicDir, 'kb_apprentice_audio.json');
-const test_sfKB = path.join(publicDir, 'kb_test_sf_audio.json');
+/* ───────── discover “*_1.mp3” & “*_2.mp3” ───────── */
+const mp3s  = fs.readdirSync(dataDir).filter(f => f.endsWith('.mp3'));
+const file1 = mp3s.find(f => /_1\.mp3$/i.test(f)) || mp3s[0];
+const file2 = mp3s.find(f => /_2\.mp3$/i.test(f)) || mp3s.find(f => f !== file1);
+if (!file1 || !file2) throw new Error('Need two .mp3 fixtures ending _1/_2');
 
-/* ─── helpers ─── */
-const ensureDir = d => fs.mkdirSync(d, { recursive: true });
-const blankKB = fp => fs.writeFileSync(
-  fp,
-  JSON.stringify(
-    { map: {}, receivedData: [], hexHistory: [], predictedText: '', modelReady: false },
-    null, 2
-  )
-);
-const save = (name, payload) => {
-  fs.writeFileSync(
-    path.join(publicDir, name),
-    Buffer.isBuffer(payload) ? payload : JSON.stringify(payload, null, 2)
-  );
+const files = { a1: file1, a2: file2 };
+
+/* ───────── helpers ───────── */
+const ensure = d => fs.mkdirSync(d, { recursive: true });
+const blank  = fp => fs.writeFileSync(fp, JSON.stringify({
+  map:{}, receivedData:[], hexHistory:[], predictedText:'', modelReady:false
+}, null,2));
+
+const cosine = (u, v) => {
+  let dot=0, nu=0, nv=0;
+  for (let i=0;i<u.length;i++){ dot+=u[i]*v[i]; nu+=u[i]*u[i]; nv+=v[i]*v[i]; }
+  return dot/ (Math.sqrt(nu)*Math.sqrt(nv));
 };
+const ms = (startNs, endNs) => Number(endNs - startNs) / 1e6;
 
-/* ─── frameworks ─── */
-let teacher, apprentice, test_sf;
+/* ───────── KB files & frameworks ───────── */
+const teacherKB    = path.join(publicDir, 'kb_teacher_audio.json');
+const apprenticeKB = path.join(publicDir, 'kb_apprentice_audio.json');
+const probeKB      = path.join(publicDir, 'kb_probe_audio.json');
+
+let teacher, apprentice, probe;
 
 beforeAll(() => {
-  ensureDir(publicDir); ensureDir(tmpDir);
-  blankKB(teacherKB); blankKB(apprenticeKB); blankKB(test_sfKB);
+  [publicDir, resultDir, tmpDir].forEach(ensure);
+  [teacherKB, apprenticeKB, probeKB].forEach(blank);
 
-  /* copy MP3 fixtures into tmp */
   Object.values(files).forEach(fn =>
-    fs.copyFileSync(path.join(dataDir, fn), path.join(tmpDir, fn))
-  );
+    fs.copyFileSync(path.join(dataDir, fn), path.join(tmpDir, fn)));
 
-  teacher   = new SemanticFramework({ kbPath: teacherKB,   imgDir: tmpDir });
-  apprentice= new SemanticFramework({ kbPath: apprenticeKB, imgDir: tmpDir });
-  test_sf   = new SemanticFramework({ kbPath: test_sfKB,    imgDir: tmpDir });
+  teacher    = new SemanticFramework({ kbPath: teacherKB,    imgDir: tmpDir });
+  apprentice = new SemanticFramework({ kbPath: apprenticeKB, imgDir: tmpDir });
+  probe      = new SemanticFramework({ kbPath: probeKB,      imgDir: tmpDir });
 });
 
-/* ─── sanity-check: codec round-trip of the two sources ─── */
-test('embed & reconstruct originals once', async () => {
-  for (const src of [files.audio1, files.audio2]) {
-    const tok   = `<audio:${src}>`;
+/* ───────── metric rows ───────── */
+const rows = [];
 
-    // ① embed (encode_vec) the local MP3 → latent
-    console.time(`embed-${src}`);
-    const latent = test_sf.encode_vec(tok);          // sync
-    console.timeEnd(`embed-${src}`);
+/* ───────── tokens ───────── */
+const tok1 = `<audio:${files.a1}>`;
+const tok2 = `<audio:${files.a2}>`;
 
-    // ② decode latent back to WAV
-    console.time(`reconstruct-${src}`);
-    const wavBuf = await test_sf.decode_vec(latent);   // async
-    console.timeEnd(`reconstruct-${src}`);
+/* ───────── prediction loop ───────── */
+test(`bidirectional prediction for ${ITERATIONS} iterations`, async () => {
+  for (let i = 1; i <= ITERATIONS; i++) {
 
-    // ③ save for manual listening
-    const wavName = src.replace(/\.mp3$/, '.wav');
-    save(`reconstructed_${wavName}`, wavBuf);
+    /* teach & predict 1 → 2 */
+    await apprentice.receive( teacher.send([tok1]) );
+    await apprentice.receive( teacher.send([tok2]) );
+    let t0 = process.hrtime.bigint();
+    const pred12 = await apprentice.predict(tok1, 'audio');
+    let t1 = process.hrtime.bigint();
+    const tMs12 = ms(t0, t1);
+    const sim12 = cosine(pred12, probe.encode_vec(tok2));
+
+    /* teach & predict 2 → 1 */
+    await apprentice.receive( teacher.send([tok2]) );
+    await apprentice.receive( teacher.send([tok1]) );
+    t0 = process.hrtime.bigint();
+    const pred21 = await apprentice.predict(tok2, 'audio');
+    t1 = process.hrtime.bigint();
+    const tMs21 = ms(t0, t1);
+    const sim21 = cosine(pred21, probe.encode_vec(tok1));
+
+    /* save per-iteration averages */
+    rows.push({
+      iter: i,
+      avgPredictMs: ((tMs12 + tMs21) / 2).toFixed(2),
+      cosineSim:   ((sim12 + sim21) / 2).toFixed(4)
+    });
   }
 });
 
-test(`cycle audio1→audio2 then audio2→audio1 for ${ITERATIONS} iterations`, async () => {
-  // helper to decode raw latent vectors into WAV
-  async function decodeLatent(latent) {
-    // if the model returned just [v0, v1, …] (no header), prepend a dummy header
-    const vec = latent.length >= 3
-      ? latent
-      : [24_000, 8, 1, ...latent];
-    return apprentice.audioCodec.decode(vec);
-  }
+/* ───────── CSV export ───────── */
+afterAll(() => {
+  if (!rows.length) return;
 
-  const tok1 = `<audio:${files.audio1}>`;
-  const tok2 = `<audio:${files.audio2}>`;
+  const header = 'iteration,avgPredictMs,cosineSim\n';
+  const body   = rows.map(r => `${r.iter},${r.avgPredictMs},${r.cosineSim}`).join('\n');
 
-  for (let i = 1; i <= ITERATIONS; ++i) {
-    // ── 1) Teach & predict audio1 → audio2 ──────────────────────
-    await apprentice.receive( teacher.send([tok1]) );
-    await apprentice.receive( teacher.send([tok2]) );
-
-    console.time(`predict audio1→audio2 iter ${i}`);
-    const latent12 = await apprentice.predict(tok1, 'audio');
-    console.timeEnd(`predict audio1→audio2 iter ${i}`);
-
-    const wav12 = await decodeLatent(latent12);
-    save(`predicted_audio_iter${i}_audio1_to_audio2.wav`, wav12);
-
-    // ── 2) Teach & predict audio2 → audio1 ──────────────────────
-    await apprentice.receive( teacher.send([tok2]) );
-    await apprentice.receive( teacher.send([tok1]) );
-
-    console.time(`predict audio2→audio1 iter ${i}`);
-    const latent21 = await apprentice.predict(tok2, 'audio');
-    console.timeEnd(`predict audio2→audio1 iter ${i}`);
-
-    const wav21 = await decodeLatent(latent21);
-    save(`predicted_audio_iter${i}_audio2_to_audio1.wav`, wav21);
-  }
-
-  console.log(`📂  Audio outputs in: ${publicDir}`);
+  fs.writeFileSync(csvPath, header + body, 'utf8');
+  console.log(`\n→ Prediction metrics written to ${csvPath}\n`);
 });

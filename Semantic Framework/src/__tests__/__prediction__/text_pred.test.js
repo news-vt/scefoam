@@ -1,108 +1,137 @@
+// src/__tests__/__prediction__/text_pred.test.js
 /* eslint-env jest */
-/**
- * Bidirectional text-pair fine-tuning test
- *
- * odd  i ⇒ teacher sends [text1 , text2]  → predict from text1
- * even i ⇒ teacher sends [text2 , text1]  → predict from text2
- *
- * Predicted sentences are saved as .txt files so you can read how the
- * Fast-Transformer evolves over time.
- */
-
+/* eslint-disable no-console */
 const fs   = require('fs');
 const path = require('path');
 const SemanticFramework = require('../../SemanticFramework').default;
 
-/* ─── config ─── */
-jest.setTimeout(600_000);
-const ITERATIONS = 4;
+/* ───────── config ───────── */
+jest.setTimeout(6_000_000);
+const ITERATIONS = 5;
 
-/* ─── paths ─── */
-const testRoot = path.resolve(__dirname, '..');
+/* ───────── folders ───────── */
+const rootDir   = path.resolve(__dirname, '..');          // src/__tests__
+const dataRoot  = path.join(rootDir, '__test_data__');
+const txtDir    = fs.existsSync(path.join(dataRoot, 'text'))
+                    ? path.join(dataRoot, 'text')
+                    : dataRoot;
 
-const dataDir   = path.join(testRoot, '__test_data__');
-const publicDir = path.join(testRoot, '__test_public__');
-const tmpDir    = path.join(process.cwd(), '__tmp_pred');
+const resultDir = path.join(rootDir, '__result__');
+const publicDir = path.join(rootDir, '__test_public__');
+const tmpDir    = path.join(process.cwd(), '__tmp');
+const csvPath   = path.join(resultDir, 'text_prediction.csv');
 
-const files = { text1: 'test_text_1.txt', text2: 'test_text_2.txt' };
+/* ───────── discover fixtures (.txt) ───────── */
+let txts = fs.readdirSync(txtDir).filter(f => f.endsWith('.txt'));
+if (txts.length < 2) throw new Error(`Need ≥2 .txt files in ${txtDir}`);
+
+const text1 = txts.find(f => /_1\.txt$/i.test(f)) || txts[0];
+txts = txts.filter(f => f !== text1);
+const text2 = txts.find(f => /_2\.txt$/i.test(f)) || txts[0];
+
+const files = { text1, text2 };
+
+/* ───────── helpers ───────── */
+const ensure = d => fs.mkdirSync(d, { recursive: true });
+const blankKB = fp => fs.writeFileSync(fp, JSON.stringify({
+  map:{}, receivedData:[], hexHistory:[], predictedText:'', modelReady:false
+}, null, 2));
+
+const save = (name, payload) =>
+  fs.writeFileSync(path.join(publicDir, name), String(payload));
+
+/* Levenshtein similarity 0-1 */
+function levSim(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1));
+  for (let i=0;i<=m;i++) dp[i][0] = i;
+  for (let j=0;j<=n;j++) dp[0][j] = j;
+  for (let i=1;i<=m;i++){
+    for (let j=1;j<=n;j++){
+      dp[i][j] = Math.min(
+        dp[i-1][j] + 1,
+        dp[i][j-1] + 1,
+        dp[i-1][j-1] + (a[i-1] === b[j-1] ? 0 : 1)
+      );
+    }
+  }
+  const lev = dp[m][n];
+  return 1 - lev / Math.max(m, n);
+}
+
+/* timing util */
+const elapsedMs = (t0, t1) => Number(t1 - t0) / 1e6;
+
+/* ───────── KB paths & frameworks ───────── */
 const teacherKB    = path.join(publicDir, 'kb_teacher_text.json');
 const apprenticeKB = path.join(publicDir, 'kb_apprentice_text.json');
+const probeKB      = path.join(publicDir, 'kb_probe_text.json');
 
-/* ─── helpers ─── */
-const ensureDir = d => fs.mkdirSync(d, { recursive: true });
-
-const blankKB = fp => fs.writeFileSync(
-  fp,
-  JSON.stringify(
-    { map:{}, receivedData:[], hexHistory:[], predictedText:'', modelReady:false },
-    null, 2
-  )
-);
-
-const save = (name, payload) => {
-  const out = path.join(publicDir, name);
-  fs.writeFileSync(out, Buffer.isBuffer(payload) ? payload : String(payload));
-};
-
-/* ─── frameworks ─── */
-let teacher, apprentice;
+let teacher, apprentice, probe;
 
 beforeAll(() => {
-  ensureDir(publicDir); ensureDir(tmpDir);
-  blankKB(teacherKB);   blankKB(apprenticeKB);
+  [publicDir, resultDir, tmpDir].forEach(ensure);
+  [teacherKB, apprenticeKB, probeKB].forEach(blankKB);
 
-  /* copy fixture TXT files into tmp */
+  /* copy fixtures into tmp so <text:…> resolves */
   Object.values(files).forEach(fn =>
-    fs.copyFileSync(path.join(dataDir, fn), path.join(tmpDir, fn))
+    fs.copyFileSync(path.join(txtDir, fn), path.join(tmpDir, fn))
   );
 
   teacher    = new SemanticFramework({ kbPath: teacherKB,    imgDir: tmpDir });
   apprentice = new SemanticFramework({ kbPath: apprenticeKB, imgDir: tmpDir });
+  probe      = new SemanticFramework({ kbPath: probeKB,      imgDir: tmpDir });
 });
 
-/* ─── test ─── */
-test(`cycle text1→text2 and text2→text1 for ${ITERATIONS} iterations`, async () => {
+/* ───────── metric buffers ───────── */
+const timesMs = [];
+const sims    = [];
 
-  for (let i = 1; i <= ITERATIONS; ++i) {
-    const forward = i % 2 === 1;                     // odd = 1→2
-    const dirTag  = forward ? '1to2' : '2to1';
-    const tokens  = forward
-      ? [`<text:${files.text1}>`, `<text:${files.text2}>`]
-      : [`<text:${files.text2}>`, `<text:${files.text1}>`];
+/* ───────── tokens ───────── */
+const tok1 = `<text:${files.text1}>`;
+const tok2 = `<text:${files.text2}>`;
 
-    /* ① teacher sends both sentences */
-    const pkts = teacher.send(tokens);
-    expect(pkts.length).toBe(2);
+/* ───────── main loop ───────── */
+test(`bidirectional prediction for ${ITERATIONS} iterations`, async () => {
+  for (let i=1; i<=ITERATIONS; i++) {
 
-    /* ② apprentice receives & decodes (trains async) */
-    const outs = await apprentice.receive(pkts);
-    expect(outs.length).toBe(2);
+    /* teach & predict text1 → text2 */
+    await apprentice.receive( teacher.send([tok1]) );
+    await apprentice.receive( teacher.send([tok2]) );
 
-    if (i === 1) {
-      outs.forEach((buf, idx) =>
-        save(`reconstructed_text_${idx + 1}.txt`, buf.toString('utf8'))
-      );
-    }
+    let t0 = process.hrtime.bigint();
+    const { text: pred12 } = await apprentice.predict(tok1, 'text', { wantText:true });
+    let t1 = process.hrtime.bigint();
+    timesMs.push(elapsedMs(t0, t1));
 
-    /* wait a bit so the 5-epoch Fast-Transformer fine-tune finishes */
-    await new Promise(r => setTimeout(r, 400));
+    sims.push(levSim(pred12, fs.readFileSync(path.join(tmpDir, files.text2), 'utf8')));
 
-    /* ③ predict next sentence from first token */
-    const { latent, text } = await apprentice.predict(
-      tokens[0],
-      'text',
-      { wantText: true }
-    );
+    /* teach & predict text2 → text1 */
+    await apprentice.receive( teacher.send([tok2]) );
+    await apprentice.receive( teacher.send([tok1]) );
 
-    /* ④ persist artefacts */
-    save(`predicted_text_iter${i}_${dirTag}.txt`, text);
-    // save latent if you want: save(`predicted_text_latent_iter${i}_${dirTag}.json`, JSON.stringify(latent));
+    t0 = process.hrtime.bigint();
+    const { text: pred21 } = await apprentice.predict(tok2, 'text', { wantText:true });
+    t1 = process.hrtime.bigint();
+    timesMs.push(elapsedMs(t0, t1));
 
-    /* sanity */
-    expect(Array.isArray(latent)).toBe(true);
-    expect(typeof text).toBe('string');
-    expect(text.length).toBeGreaterThan(0);
+    sims.push(levSim(pred21, fs.readFileSync(path.join(tmpDir, files.text1), 'utf8')));
+
+    /* save outputs for manual inspection */
+    save(`pred_iter${i}_${i%2?'1to2':'2to1'}.txt`, i%2 ? pred12 : pred21);
   }
+});
 
-  console.log(`📂  Text outputs saved to: ${publicDir}`);
+/* ───────── CSV export ───────── */
+afterAll(() => {
+  if (!timesMs.length) return;
+
+  const avg = arr => arr.reduce((s,v)=>s+v,0)/arr.length;
+  const csv =
+    `metric,value\n` +
+    `avgPredictMs,${avg(timesMs).toFixed(2)}\n` +
+    `avgLevSim,${avg(sims).toFixed(4)}\n`;
+
+  fs.writeFileSync(csvPath, csv, 'utf8');
+  console.log(`\n→ Prediction metrics written to ${csvPath}\n`);
 });

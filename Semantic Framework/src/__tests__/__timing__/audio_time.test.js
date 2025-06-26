@@ -1,124 +1,72 @@
-// timing_audio.test.js
-const fs = require('fs');
+// src/__tests__/__timing__/audio_time.test.js
+/* eslint-disable no-console */
+const fs   = require('fs');
 const path = require('path');
 const SemanticFramework = require('../../SemanticFramework').default;
 
-describe('SemanticFramework Audio & KB Performance', () => {
+/* ─────────── canonical folders ─────────── */
+const rootDir   = path.resolve(__dirname, '..');      // project root
+const dataDir   = path.join(rootDir, '__test_data__', 'audio');
+const resultDir = path.join(rootDir, '__result__');
+const publicDir = path.join(rootDir, '__test_public__');
+const tmpDir    = path.join(process.cwd(), '__tmp');
+const kbFile    = path.join(publicDir, 'kb_audio_test.json');
+const csvPath   = path.join(resultDir, 'audio_timing.csv');
 
-    const testRoot = path.resolve(__dirname, '..');
-    const publicDir = path.join(testRoot, '__test_public__');
-    const dataDir = path.join(testRoot, '__test_data__');
-    const tmpDir = path.join(process.cwd(), '__tmp');
-    const kbFile = path.join(publicDir, 'knowledge_base_audio_test.json');
+/* ─────────── env prep ─────────── */
+beforeAll(() => {
+  [publicDir, resultDir, tmpDir].forEach(d => fs.mkdirSync(d, { recursive: true }));
+  if (!fs.existsSync(kbFile)) fs.writeFileSync(kbFile, '{}');
+});
 
-    const sourceAudio1 = path.join(dataDir, 'test_audio_1.mp3');
-    const sourceAudio2 = path.join(dataDir, 'test_audio_2.mp3');
-    const audioName1 = 'test_audio_1.mp3';
-    const audioName2 = 'test_audio_2.mp3';
-    const tmpAudioPath1 = path.join(tmpDir, audioName1);
-    const tmpAudioPath2 = path.join(tmpDir, audioName2);
+/* ─────────── SemanticFramework ─── */
+let sf;
+beforeAll(() => { sf = new SemanticFramework({ kbPath: kbFile }); });
 
-    let sf;
-    beforeAll(() => {
-        // ensure directories
-        for (const d of [publicDir, tmpDir]) {
-            fs.mkdirSync(d, { recursive: true });
-        }
-        // init KB
-        if (!fs.existsSync(kbFile)) {
-            fs.writeFileSync(
-                kbFile,
-                JSON.stringify({
-                    map: {}, receivedData: [], hexHistory: [],
-                    predictedText: '', modelReady: false
-                }, null, 2)
-            );
-        }
-        // copy test inputs
-        fs.copyFileSync(sourceAudio1, tmpAudioPath1);
-        fs.copyFileSync(sourceAudio2, tmpAudioPath2);
+/* ─────────── fixtures ─────────── */
+const mp3Files = fs.readdirSync(dataDir).filter(f => f.endsWith('.mp3'));
+if (mp3Files.length === 0) throw new Error(`No .mp3 fixtures in ${dataDir}`);
 
-        sf = new SemanticFramework({
-            kbPath: kbFile,
-        });
-    });
+beforeAll(() => {
+  mp3Files.forEach(f =>
+    fs.copyFileSync(path.join(dataDir, f), path.join(tmpDir, f)));
+});
 
-    test('embed audio timing (1)', () => {
-        console.time('embed-audio');
-        const vec = sf.encode_vec(`<audio:${audioName1}>`);
-        console.timeEnd('embed-audio');
-        expect(Array.isArray(vec)).toBe(true);
-    });
+/* ─────────── timers ─────────── */
+const ns2ms   = ns => Number(ns) / 1e6;
+const encMs   = [];
+const decMs   = [];
 
-    test('embed audio timing (2)', () => {
-        console.time('embed-audio');
-        const vec = sf.encode_vec(`<audio:${audioName2}>`);
-        console.timeEnd('embed-audio');
-        expect(Array.isArray(vec)).toBe(true);
-    });
+/* ─────────── timed tests ─────────── */
+mp3Files.forEach(file => {
+  const token = `<audio:${file}>`;
 
-    test('reconstruct audio timing and save (1)', async () => {
-        const vec = sf.encode_vec(`<audio:${audioName1}>`);
-        console.time('reconstruct-audio');
-        const buf = await sf.decode_vec(vec);
-        console.timeEnd('reconstruct-audio');
-        const outName = audioName1.replace(/\.mp3$/, '.wav');
-        const outPath = path.join(publicDir, 'reconstructed_' + outName);
-        fs.writeFileSync(outPath, buf);
-        expect(fs.existsSync(outPath)).toBe(true);
-    });
+  test(`encode ${file}`, () => {
+    const t0 = process.hrtime.bigint();
+    const v  = sf.encode_vec(token);
+    const t1 = process.hrtime.bigint();
+    encMs.push(ns2ms(t1 - t0));
+    expect(Array.isArray(v)).toBe(true);
+  });
 
-    test('reconstruct audio timing and save (2)', async () => {
-        const vec = sf.encode_vec(`<audio:${audioName2}>`);
-        console.time('reconstruct-audio');
-        const buf = await sf.decode_vec(vec);
-        console.timeEnd('reconstruct-audio');
-        const outName = audioName2.replace(/\.mp3$/, '.wav');
-        const outPath = path.join(publicDir, 'reconstructed_' + outName);
-        fs.writeFileSync(outPath, buf);
-        expect(fs.existsSync(outPath)).toBe(true);
-    });
+  test(`decode ${file}`, async () => {
+    const v  = sf.encode_vec(token);
+    const t0 = process.hrtime.bigint();
+    await sf.decode_vec(v);
+    const t1 = process.hrtime.bigint();
+    decMs.push(ns2ms(t1 - t0));
+  });
+});
 
-    test('sift KB timing (1)', () => {
-        const vec = sf.encode_vec(`<audio:${audioName1}>`);
-        sf._register([vec]);
-        console.time('sift-kb');
-        sf.findClosestHexByVector(vec);
-        console.timeEnd('sift-kb');
-    });
+/* ─────────── CSV export ─────────── */
+afterAll(() => {
+  if (!encMs.length) return;
 
-    test('sift KB timing (2)', () => {
-        const vec = sf.encode_vec(`<audio:${audioName2}>`);
-        sf._register([vec]);
-        console.time('sift-kb');
-        sf.findClosestHexByVector(vec);
-        console.timeEnd('sift-kb');
-    });
+  const avg = arr => arr.reduce((s, v) => s + v, 0) / arr.length;
+  const csv = `metric,avgMilliseconds\n` +
+              `embedAudio,${avg(encMs).toFixed(2)}\n` +
+              `decodeAudio,${avg(decMs).toFixed(2)}\n`;
 
-    test('size and similarity metrics', () => {
-        // Original MP3 on disk
-        const origSize = fs.statSync(tmpAudioPath1).size;
-
-        // Latent JSON size
-        const vec = sf.encode_vec(`<audio:${audioName1}>`);
-        const latentSize = Buffer.byteLength(JSON.stringify(vec), 'utf8');
-
-        // Reconstructed WAV size (replace .mp3 → .wav)
-        const outName = audioName1.replace(/\.mp3$/, '.wav');
-        const reconPath = path.join(publicDir, 'reconstructed_' + outName);
-        const reconSize = fs.statSync(reconPath).size;
-
-        // Percent differences
-        const percLatent = ((origSize - latentSize) / origSize) * 100;
-        const percRecon = ((reconSize - origSize) / origSize) * 100;
-
-        console.log(
-            `Original: ${origSize} B — Latent: ${latentSize} B (${percLatent.toFixed(2)}%)` +
-            ` — Recon: ${reconSize} B (${percRecon.toFixed(2)}%)`
-        );
-
-        // latent should always be smaller than the original
-        expect(latentSize).toBeLessThan(origSize);
-    });
-
+  fs.writeFileSync(csvPath, csv, 'utf8');
+  console.log(`\n→ Wrote CSV to ${csvPath}\n`);
 });

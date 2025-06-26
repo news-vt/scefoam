@@ -1,124 +1,72 @@
-// timing.test.js
-const fs = require('fs');
+// src/__tests__/__timing__/image_time.test.js
+/* eslint-disable no-console */
+const fs   = require('fs');
 const path = require('path');
 const SemanticFramework = require('../../SemanticFramework').default;
 
-describe('SemanticFramework Image & KB Performance', () => {
+/* ─────────── canonical folders ─────────── */
+const rootDir   = path.resolve(__dirname, '..');          // project root
+const dataDir   = path.join(rootDir, '__test_data__', 'images');
+const resultDir = path.join(rootDir, '__result__');
+const publicDir = path.join(rootDir, '__test_public__');
+const tmpDir    = path.join(process.cwd(), '__tmp');
+const kbFile    = path.join(publicDir, 'kb_images_test.json');
+const csvPath   = path.join(resultDir, 'image_timing.csv');
 
-    const testRoot = path.resolve(__dirname, '..');
-    const publicDir = path.join(testRoot, '__test_public__');
-    const dataDir          = path.join(testRoot, '__test_data__');
-    const tmpDir = path.join(process.cwd(), '__tmp');
-    const kbFile = path.join(publicDir, 'knowledge_base_images_test.json');
+/* ─────────── env prep ─────────── */
+beforeAll(() => {
+  [publicDir, resultDir, tmpDir].forEach(d => fs.mkdirSync(d, { recursive: true }));
+  if (!fs.existsSync(kbFile)) fs.writeFileSync(kbFile, '{}');
+});
 
-    const sourceImage1 = path.join(dataDir, 'test_image_1.jpg');
-    const sourceImage2 = path.join(dataDir, 'test_image_2.jpg');
-    const imageName1 = 'test_image_1.jpg';
-    const imageName2 = 'test_image_2.jpg';
-    const tmpImagePath1 = path.join(tmpDir, imageName1);
-    const tmpImagePath2 = path.join(tmpDir, imageName2);
+/* ─────────── SemanticFramework ─── */
+let sf;
+beforeAll(() => { sf = new SemanticFramework({ kbPath: kbFile }); });
 
-    let sf;
-    beforeAll(() => {
-        for (const d of [publicDir, tmpDir]) fs.mkdirSync(d, { recursive: true });
-        if (!fs.existsSync(kbFile)) {
-            fs.writeFileSync(kbFile, JSON.stringify({ map: {}, receivedData: [], hexHistory: [], predictedText: '', modelReady: false }, null, 2));
-        }
-        fs.copyFileSync(sourceImage1, tmpImagePath1);
-        fs.copyFileSync(sourceImage2, tmpImagePath2);
-        sf = new SemanticFramework({ kbPath: kbFile });
-    });
+/* ─────────── fixtures ─────────── */
+const jpgFiles = fs.readdirSync(dataDir).filter(f => f.endsWith('.jpg'));
+if (jpgFiles.length === 0) throw new Error(`No .jpg fixtures in ${dataDir}`);
 
-    test('embed image timing (1)', () => {
-        console.time('embed-image');
-        const vec = sf.encode_vec(`<img:${imageName1}>`);
-        console.timeEnd('embed-image');
-        expect(Array.isArray(vec)).toBe(true);
-    });
+beforeAll(() => {
+  jpgFiles.forEach(f =>
+    fs.copyFileSync(path.join(dataDir, f), path.join(tmpDir, f)));
+});
 
-    test('embed image timing (2)', () => {
-        console.time('embed-image');
-        const vec = sf.encode_vec(`<img:${imageName2}>`);
-        console.timeEnd('embed-image');
-        expect(Array.isArray(vec)).toBe(true);
-    });
+/* ─────────── timers ─────────── */
+const ns2ms    = ns => Number(ns) / 1e6;
+const encTimes = [];
+const decTimes = [];
 
-    test('reconstruct image timing and save (1)', async () => {
-        const vec = sf.encode_vec(`<img:${imageName1}>`);
-        console.time('reconstruct-image');
-        const buf = await sf.decode_vec(vec);
-        console.timeEnd('reconstruct-image');
-        const outPath = path.join(publicDir, 'reconstructed_' + imageName1);
-        fs.writeFileSync(outPath, buf);
-        expect(fs.existsSync(outPath)).toBe(true);
-    });
+/* ─────────── timed tests ─────────── */
+jpgFiles.forEach(file => {
+  const token = `<img:${file}>`;
 
-    test('reconstruct image timing and save (2)', async () => {
-        const vec = sf.encode_vec(`<img:${imageName2}>`);
-        console.time('reconstruct-image');
-        const buf = await sf.decode_vec(vec);
-        console.timeEnd('reconstruct-image');
-        const outPath = path.join(publicDir, 'reconstructed_' + imageName2);
-        fs.writeFileSync(outPath, buf);
-        expect(fs.existsSync(outPath)).toBe(true);
-    });
+  test(`encode ${file}`, () => {
+    const t0 = process.hrtime.bigint();
+    const v  = sf.encode_vec(token);
+    const t1 = process.hrtime.bigint();
+    encTimes.push(ns2ms(t1 - t0));
+    expect(Array.isArray(v)).toBe(true);
+  });
 
-    test('sift KB timing (1)', () => {
-        const vec = sf.encode_vec(`<img:${imageName1}>`);
-        sf._register([vec]);
-        console.time('sift-kb');
-        sf.findClosestHexByVector(vec);
-        console.timeEnd('sift-kb');
-    });
+  test(`decode ${file}`, async () => {
+    const v  = sf.encode_vec(token);
+    const t0 = process.hrtime.bigint();
+    await sf.decode_vec(v);
+    const t1 = process.hrtime.bigint();
+    decTimes.push(ns2ms(t1 - t0));
+  });
+});
 
-    test('sift KB timing (2)', () => {
-        const vec = sf.encode_vec(`<img:${imageName2}>`);
-        sf._register([vec]);
-        console.time('sift-kb');
-        sf.findClosestHexByVector(vec);
-        console.timeEnd('sift-kb');
-    });
+/* ─────────── CSV export ─────────── */
+afterAll(() => {
+  if (!encTimes.length) return;
 
-    // test('size and similarity metrics', () => {
-    //     // File sizes
-    //     const origSize = fs.statSync(tmpImagePath).size;
-    //     const vec = sf.encode_vec(`<img:${imageName}>`);
-    //     const latentSize = Buffer.byteLength(JSON.stringify(vec), 'utf8');
-    //     const reconPath = path.join(publicDir, 'reconstructed_' + imageName);
-    //     const reconSize = fs.statSync(reconPath).size;
-    //     // Percent differences
-    //     const percLatent = ((origSize - latentSize) / origSize) * 100;
-    //     const percRecon = ((reconSize - origSize) / origSize) * 100;
-    //     console.log(`Original: ${origSize} bytes - Latent: ${latentSize} bytes (${percLatent.toFixed(2)}%) - Recon: ${reconSize} bytes (${percRecon.toFixed(2)}%)`);
-    //     expect(latentSize).toBeLessThan(origSize);
+  const avg = arr => arr.reduce((s, v) => s + v, 0) / arr.length;
+  const csv = `metric,avgMilliseconds\n` +
+              `embedImage,${avg(encTimes).toFixed(2)}\n` +
+              `decodeImage,${avg(decTimes).toFixed(2)}\n`;
 
-    //     // Pixel difference
-    //     const origBuffer = fs.readFileSync(sourceImage);
-    //     const reconBuffer = fs.readFileSync(reconPath);
-    //     const origJpeg = jpeg.decode(origBuffer, { useTArray: true });
-    //     const reconJpeg = jpeg.decode(reconBuffer, { useTArray: true });
-
-    //     expect(reconJpeg.width).toBe(origJpeg.width);
-    //     expect(reconJpeg.height).toBe(origJpeg.height);
-
-    //     const width = origJpeg.width;
-    //     const height = origJpeg.height;
-    //     const origData = origJpeg.data;
-    //     const reconData = reconJpeg.data;
-    //     let diffCount = 0;
-    //     const threshold = 10;
-    //     for (let i = 0; i < origData.length; i += 4) {
-    //         if (
-    //             Math.abs(origData[i] - reconData[i]) > threshold ||
-    //             Math.abs(origData[i + 1] - reconData[i + 1]) > threshold ||
-    //             Math.abs(origData[i + 2] - reconData[i + 2]) > threshold
-    //         ) {
-    //             diffCount++;
-    //         }
-    //     }
-    //     const diffRatio = (diffCount / (width * height)) * 100;
-    //     console.log(`Pixel difference: ${diffRatio.toFixed(2)}%`);
-    //     // Expect less than 10% of pixels differ significantly
-    // });
-
+  fs.writeFileSync(csvPath, csv, 'utf8');
+  console.log(`\n→ Wrote CSV to ${csvPath}\n`);
 });

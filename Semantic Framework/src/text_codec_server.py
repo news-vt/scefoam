@@ -18,32 +18,29 @@ from sonar.inference_pipelines.text import (
 ENCODER_NAME = "text_sonar_basic_encoder"
 DECODER_NAME = "text_sonar_basic_decoder"
 LANG         = "eng_Latn"
-DEVICE       = "cuda" if torch.cuda.is_available() else "cpu"
+# DEVICE       = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE       = "cpu"
 
 # ── Initialize SONAR pipelines & infer embedding dim ─────────────────────────
-print(f"Loading SONAR text encoder (‘{ENCODER_NAME}’) on {DEVICE}…", file=sys.stderr)
+# print(f"Loading SONAR text encoder (‘{ENCODER_NAME}’) on {DEVICE}…", file=sys.stderr)
 t2vec = TextToEmbeddingModelPipeline(
     encoder=ENCODER_NAME,
     tokenizer=ENCODER_NAME,
-    device=torch.device("cuda"),
-    dtype=torch.float16,
 )
 
-print(f"Loading SONAR text decoder (‘{DECODER_NAME}’) on {DEVICE}…", file=sys.stderr)
+# print(f"Loading SONAR text decoder (‘{DECODER_NAME}’) on {DEVICE}…", file=sys.stderr)
 v2t = EmbeddingToTextModelPipeline(
     decoder=DECODER_NAME,
     tokenizer=ENCODER_NAME,
-    device=torch.device("cuda"),
-    dtype=torch.float16,
 )
 
-# dummy call to get D
+# Getting dimension size D
 _dummy = t2vec.predict([""], source_lang=LANG)
 if isinstance(_dummy, torch.Tensor):
     EMB_SIZE = _dummy.size(1)
 else:
     EMB_SIZE = _dummy.shape[1]
-print(f"Detected embedding size: {EMB_SIZE}", file=sys.stderr)
+# print(f"Detected embedding size: {EMB_SIZE}", file=sys.stderr)
 
 # ──────────────────────────────────────────────────
 #  FastFormer building block
@@ -76,6 +73,8 @@ MODEL:       nn.Module | None      = None
 OPT:         optim.Optimizer | None= None
 LOSS = nn.MSELoss()
 LR, EPOCHS = 3e-4, 20
+ACC_THR     = 99.9 
+TOLERANCE = 0.05
 TRAIN_LOCK = asyncio.Lock()
 
 class LatentFastFormer1D(nn.Module):
@@ -117,8 +116,18 @@ async def _maybe_train():
         MODEL.train()
         for _ in range(EPOCHS):
             OPT.zero_grad()
-            LOSS(MODEL(xs.to(DEVICE)), ys.to(DEVICE)).backward()
+
+            # forward pass & loss -------------------------------------------------
+            preds = MODEL(xs.to(DEVICE))          # (N-1, EMB_SIZE)
+            loss  = LOSS(preds, ys.to(DEVICE))    # scalar
+            loss.backward()
             OPT.step()
+            with torch.no_grad():
+                correct = (preds - ys.to(DEVICE)).abs() < TOLERANCE
+                acc = correct.float().mean().item() * 100.0
+            if acc >= ACC_THR:
+                break
+        # print(f"[Train-loop] loss={loss.item():.4f} – " f"acc={acc:.1f}%", flush=True)
         MODEL.eval()
 
 # ── FastAPI app ─────────────────────────────────────────────────────────────

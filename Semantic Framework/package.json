@@ -23,9 +23,14 @@
     "test:time:audio": "jest --runInBand src/__tests__/__timing__/audio_time.test.js",
 
     "test:comm":  "jest --runInBand src/__tests__/__communication__/",
-    "test:comm:text":  "jest --runInBand src/__tests__/__communication__/text_time.test.js",
-    "test:comm:image": "jest --runInBand src/__tests__/__communication__/image_time.test.js",
-    "test:comm:audio": "jest --runInBand src/__tests__/__communication__/audio_time.test.js"
+    "test:comm:text":  "jest --runInBand src/__tests__/__communication__/text_comm.test.js",
+    "test:comm:image": "jest --runInBand src/__tests__/__communication__/image_comm.test.js",
+    "test:comm:audio": "jest --runInBand src/__tests__/__communication__/audio_comm.test.js",
+    
+    "test:acc":  "jest --runInBand src/__tests__/__accuracy__/",
+    "test:acc:text":  "jest --runInBand src/__tests__/__accuracy__/text_acc.test.js",
+    "test:acc:image": "jest --runInBand src/__tests__/__accuracy__/image_acc.test.js",
+    "test:acc:audio": "jest --runInBand src/__tests__/__accuracy__/audio_acc.test.js"
   },
   "type": "module",
   "jest": {
