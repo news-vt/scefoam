@@ -6,29 +6,24 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "test": "jest --runInBand src/__tests__",
-
-    "test:size":  "jest --runInBand src/__tests__/__sizing__/",
-    "test:size:text":  "jest --runInBand src/__tests__/__sizing__/text_size.test.js",
+    "test:size": "jest --runInBand src/__tests__/__sizing__/",
+    "test:size:text": "jest --runInBand src/__tests__/__sizing__/text_size.test.js",
     "test:size:image": "jest --runInBand src/__tests__/__sizing__/image_size.test.js",
     "test:size:audio": "jest --runInBand src/__tests__/__sizing__/audio_size.test.js",
-
-    "test:pred":  "jest --runInBand src/__tests__/__prediction__/",
-    "test:pred:text":  "jest --runInBand src/__tests__/__prediction__/text_pred.test.js",
+    "test:pred": "jest --runInBand src/__tests__/__prediction__/",
+    "test:pred:text": "jest --runInBand src/__tests__/__prediction__/text_pred.test.js",
     "test:pred:image": "jest --runInBand src/__tests__/__prediction__/image_pred.test.js",
     "test:pred:audio": "jest --runInBand src/__tests__/__prediction__/audio_pred.test.js",
-
-    "test:time":  "jest --runInBand src/__tests__/__timing__/",
-    "test:time:text":  "jest --runInBand src/__tests__/__timing__/text_time.test.js",
+    "test:time": "jest --runInBand src/__tests__/__timing__/",
+    "test:time:text": "jest --runInBand src/__tests__/__timing__/text_time.test.js",
     "test:time:image": "jest --runInBand src/__tests__/__timing__/image_time.test.js",
     "test:time:audio": "jest --runInBand src/__tests__/__timing__/audio_time.test.js",
-
-    "test:comm":  "jest --runInBand src/__tests__/__communication__/",
-    "test:comm:text":  "jest --runInBand src/__tests__/__communication__/text_comm.test.js",
+    "test:comm": "jest --runInBand src/__tests__/__communication__/",
+    "test:comm:text": "jest --runInBand src/__tests__/__communication__/text_comm.test.js",
     "test:comm:image": "jest --runInBand src/__tests__/__communication__/image_comm.test.js",
     "test:comm:audio": "jest --runInBand src/__tests__/__communication__/audio_comm.test.js",
-    
-    "test:acc":  "jest --runInBand src/__tests__/__accuracy__/",
-    "test:acc:text":  "jest --runInBand src/__tests__/__accuracy__/text_acc.test.js",
+    "test:acc": "jest --runInBand src/__tests__/__accuracy__/",
+    "test:acc:text": "jest --runInBand src/__tests__/__accuracy__/text_acc.test.js",
     "test:acc:image": "jest --runInBand src/__tests__/__accuracy__/image_acc.test.js",
     "test:acc:audio": "jest --runInBand src/__tests__/__accuracy__/audio_acc.test.js"
   },
@@ -65,6 +60,7 @@
   },
   "devDependencies": {
     "@babel/preset-env": "^7.27.2",
+    "bleu-score": "^1.0.4",
     "jest": "^29.7.0",
     "nodemon": "^3.1.7"
   }
