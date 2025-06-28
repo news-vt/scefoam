@@ -63,7 +63,6 @@ for (const file of fs.readdirSync(dataDir).filter(f => f.endsWith('.txt'))) {
 
       /* cosine similarity --------------------------------------------- */
       const sim = cosine(refVec, hypVec);
-      const pct = (sim * 100).toFixed(2);
 
       fs.writeFileSync(
         path.join(reconDir, file.replace('.txt', '_recon.txt')),
@@ -71,8 +70,6 @@ for (const file of fs.readdirSync(dataDir).filter(f => f.endsWith('.txt'))) {
         'utf8'
       );
 
-      console.log(`\n[${file}] cosine = ${pct}%`);
-      console.log('  ↳ first 240 chars of HYP:\n', hypStr.slice(0, 240), '…\n');
 
       rows.push({ file, cosine: sim });
     },
