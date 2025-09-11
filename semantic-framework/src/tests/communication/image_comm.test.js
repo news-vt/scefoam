@@ -3,6 +3,7 @@
 const fs   = require('fs');
 const path = require('path');
 const os   = require('os');
+const { performance } = require('node:perf_hooks');
 const SemanticFramework = require('../../semantic_framework').default;
 
 jest.setTimeout(120_000);
@@ -23,39 +24,43 @@ if (!fs.existsSync(dataDir)) {
     test('skipped', () => {});
   });
 } else {
+  // copy fixtures so <image:FILE> resolves
   fs.readdirSync(dataDir).forEach(f =>
     fs.copyFileSync(path.join(dataDir, f), path.join(tmpDir, f))
   );
 
   const sf = new SemanticFramework({ kbPath, imgDir: tmpDir });
 
-  const commRows = [];
+  const commRows   = [];
   const lookupRows = [];
-  const reprRows = [];
-  let   pktId = 0;
+  const reprRows   = [];
+  let   pktId      = 0;
 
   const symbolCount = token =>
-    sf.symbol_count ? sf.symbol_count(token) : 4096;   // fallback
+    sf.symbol_count ? sf.symbol_count(token) : 4096; // fallback
 
   for (const file of fs.readdirSync(dataDir).filter(f => f.match(/\.(png|jpe?g)$/i))) {
     test(`send ${file}`, async () => {
       const token   = `<image:${file}>`;
       const payload = sf.send([token]);
 
+      // (1) packet sizes
       payload.forEach(pkt =>
         commRows.push({ packet: ++pktId,
                         bytes: Buffer.byteLength(JSON.stringify(pkt)) })
       );
 
+      // (2) representation vector & basics
       const vec         = sf.encode_vec(token);
       const reprBits    = vec.length * 32;
       const srcBytes    = fs.statSync(path.join(dataDir, file)).size;
       const contentNats = srcBytes * 8 * Math.LN2;
 
+      // (3) KPIs
       [
         { variant:'classical',   reprBits:srcBytes*8, packets:1 },
-        { variant:'semanticAll', reprBits, packets:symbolCount(token) },
-        { variant:'proposed',    reprBits, packets:payload.length },
+        { variant:'semanticAll', reprBits,            packets:symbolCount(token) },
+        { variant:'proposed',    reprBits,            packets:payload.length },
       ].forEach(r =>
         reprRows.push({
           file, variant:r.variant,
@@ -66,9 +71,14 @@ if (!fs.existsSync(dataDir)) {
         })
       );
 
-      const t0 = Date.now();
+      // (4) PURE LOOKUP LATENCY: after send(), before receive()
+      const t0 = performance.now();
+      sf.findClosestHexByVector(vec, 0.999);
+      const ms = performance.now() - t0;
+      lookupRows.push({ file, lookupMs: ms });
+
+      // (5) persist after timing lookup
       await sf.receive(payload);
-      lookupRows.push({ file, lookupMs: Date.now() - t0 });
     });
   }
 

@@ -3,7 +3,6 @@
 const fs   = require('fs');
 const path = require('path');
 const os   = require('os');
-const { performance } = require('node:perf_hooks');
 const SemanticFramework = require('../../semantic_framework').default;
 
 jest.setTimeout(120_000);
@@ -47,7 +46,7 @@ if (!fs.existsSync(dataDir)) {
       const token   = `<text:${file}>`;
       const payload = sf.send([token]);
 
-      // (1) packet sizes (proposed)
+      // (1) packet sizes (proposed) 
       payload.forEach(pkt =>
         commRows.push({ packet: ++pktId,
                         bytes: Buffer.byteLength(JSON.stringify(pkt)) })
@@ -61,48 +60,46 @@ if (!fs.existsSync(dataDir)) {
       const packetsProp = payload.length;
 
       // (3) push three KPI rows
-      [
-        { variant: 'classical',   reprBits: srcBytes * 8, packets: 1 },
-        { variant: 'semanticAll', reprBits,               packets: symbolCount(token) },
-        { variant: 'proposed',    reprBits,               packets: packetsProp },
-      ].forEach(r =>
+      const rows = [
+        { variant: 'classical',
+          reprBits: srcBytes * 8,
+          packets : 1 },
+        { variant: 'semanticAll',
+          reprBits,
+          packets : symbolCount(token) },
+        { variant: 'proposed',
+          reprBits,
+          packets : packetsProp },
+      ];
+      rows.forEach(r =>
         reprRows.push({
           file,
-          variant     : r.variant,
+          variant:     r.variant,
           contentNats,
-          reprBits    : r.reprBits,
-          packets     : r.packets,
-          impact      : r.packets / r.reprBits
+          reprBits:    r.reprBits,
+          packets:     r.packets,
+          impact:      r.packets / r.reprBits
         })
       );
 
-      // (4) PURE LOOKUP LATENCY: measure cosine search AFTER send(), before receive()
-      const t0 = performance.now();
-      sf.findClosestHexByVector(vec, 0.999);
-      const ms = performance.now() - t0;
-      lookupRows.push({ file, lookupMs: ms });
-
-      // (5) persist after timing lookup
+      // (4) KB-lookup time (optional)
+      const t0 = Date.now();
       await sf.receive(payload);
+      lookupRows.push({ file, lookupMs: Date.now() - t0 });
     });
   }
 
   afterAll(() => {
-    // comm bytes
     fs.writeFileSync(
       path.join(resultDir, 'text_comm.csv'),
       'packet,bytes\n' +
         commRows.map(r => `${r.packet},${r.bytes}`).join('\n') + '\n'
     );
-
-    // lookup timings
     fs.writeFileSync(
       path.join(resultDir, 'text_knowledgebase.csv'),
       'fileName,lookupMs\n' +
         lookupRows.map(r => `${r.file},${r.lookupMs}`).join('\n') + '\n'
     );
-
-    // KPI rows
     fs.writeFileSync(
       path.join(resultDir, 'text_semantic_kpis.csv'),
       'fileName,variant,contentNats,reprBits,packets,impact\n' +
