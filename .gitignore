@@ -67,7 +67,7 @@ venv/
 
 
 # large binaries/videos we don’t want in Git
-/Semantic Framework/src/__tests__/__test_public/reconstructed_video.mp4
+/Semantic Framework/src/tests/__test_public/reconstructed_video.mp4
 
 # typescript bundles that are too big
 /Semantic Framework/src/vae_encode.ts

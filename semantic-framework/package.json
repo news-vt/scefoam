@@ -17,6 +17,7 @@
     "test:pred:text": "jest --runInBand src/tests/prediction/text_pred.test.js",
     "test:pred:image": "jest --runInBand src/tests/prediction/image_pred.test.js",
     "test:pred:audio": "jest --runInBand src/tests/prediction/audio_pred.test.js",
+    "test:pred:vid": "jest --runInBand src/tests/prediction/image_vid_pred.test.js",
     "test:time": "jest --runInBand src/tests/timing/",
     "test:time:text": "jest --runInBand src/tests/timing/text_time.test.js",
     "test:time:image": "jest --runInBand src/tests/timing/image_time.test.js",
