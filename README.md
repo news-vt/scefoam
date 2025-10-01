@@ -1,7 +1,7 @@
 # SCE-FOAM: Semantic Context-aware Framework for Adaptive Multimodal Reasoning
 ## Media
 
-[![SCE-FOAM Demo](https://img.youtube.com/vi/x2J6t9J4xgQ/0.jpg)](https://youtu.be/x2J6t9J4xgQ)
+[![SCE-FOAM Demo](https://img.youtube.com/vi/Mh4FryIMvKk/0.jpg)](https://youtu.be/Mh4FryIMvKk?si=DL-SmaBZGGXF-cgG)
 
 ## Quickstart
 
