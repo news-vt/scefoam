@@ -3,6 +3,16 @@
 
 [![SCE-FOAM Demo](https://img.youtube.com/vi/Mh4FryIMvKk/0.jpg)](https://youtu.be/Mh4FryIMvKk?si=DL-SmaBZGGXF-cgG)
 
+
+
+## Paper
+**Title:** Artificial Intelligence (AI)-based Semantic Communications with Multimodal Data: Framework and Implementation  
+**Author:** Jean-Luc Aristide DeRieux  
+**Publisher:** Virginia Tech  
+**Date:** September 22, 2025  
+**URL:** [Access Paper](https://vtechworks.lib.vt.edu/items/eec7b677-ccbf-4579-b23e-7618b78bd724)
+**Abstract:** Semantic communication (SC) has emerged as an effective paradigm for reducing the bandwidth needs of wireless services by exploiting the so-called "semantics" or meaning behind the data. To date, existing works in this area either focus on multimodal approaches only and omit context-aware recovery or embed it in cross-modal settings, such as audio-to-video, rather than providing a unified, modality-agnostic method. These works also impose substantial architecture redesigns for additional modalities support and are not easily extensible. In contrast to prior work, in this thesis, a novel semantic framework called the semantic context-aware framework for adaptive multimodal reasoning (SCE-FOAM) is proposed. SCE-FOAM is a multimodal semantic framework that enables compact transmission, efficient reconstruction, and contextually-aware predictions using a unique microservice-based architecture. This unique design simultaneously offers an extensible and modular platform for incorporating new modalities and enabling scalable deployment strategies. Experimental results show that SCE-FOAM can achieve data reductions up to 50% for text, 94.56% for audio, and 98.70% for images, respectively. Lastly, the proposed contextual‑prediction model achieves an average accuracy of 90% across all modalities. In addition, a heuristic-based extension of the deferred acceptance (DA) matching algorithm is proposed. The extension enables network node matches that incorporate exploration, coverage, and diversification heuristics. In summary, this thesis presents a unified, extensible, context-aware, multimodal SC framework and a heuristic extension to the DA matching algorithm.
+
 ## Quickstart
 
 ```bash
